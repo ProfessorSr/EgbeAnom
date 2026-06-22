@@ -1,0 +1,54 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Egbe Anom (Chrome debug)",
+            "cwd": "${workspaceFolder}/egbeanom",
+            "program": "${workspaceFolder}/egbeanom/lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co",
+                "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRldnRlY2tueHBnZGhia2RqbnZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTkzNjgsImV4cCI6MjA5NzIzNTM2OH0.yyBLbTrdXtanXmI_AB2BcbBoKAGDuWcod5C5DFvudoE",
+                "--dart-define=SUPABASE_PRODUCT_BUCKET=product-images"
+            ]
+        },
+        {
+            "name": "Egbe Anom (macOS debug)",
+            "cwd": "${workspaceFolder}/egbeanom",
+            "program": "${workspaceFolder}/egbeanom/lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos"
+        },
+        {
+            "name": "egbeanom (profile mode)",
+            "cwd": "${workspaceFolder}/egbeanom",
+            "program": "${workspaceFolder}/egbeanom/lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co",
+                "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRldnRlY2tueHBnZGhia2RqbnZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTkzNjgsImV4cCI6MjA5NzIzNTM2OH0.yyBLbTrdXtanXmI_AB2BcbBoKAGDuWcod5C5DFvudoE",
+                "--dart-define=SUPABASE_PRODUCT_BUCKET=product-images"
+            ]
+        },
+        {
+            "name": "egbeanom (release mode)",
+            "cwd": "${workspaceFolder}/egbeanom",
+            "program": "${workspaceFolder}/egbeanom/lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co",
+                "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRldnRlY2tueHBnZGhia2RqbnZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTkzNjgsImV4cCI6MjA5NzIzNTM2OH0.yyBLbTrdXtanXmI_AB2BcbBoKAGDuWcod5C5DFvudoE",
+                "--dart-define=SUPABASE_PRODUCT_BUCKET=product-images"
+            ]
+        }
+    ]
+}

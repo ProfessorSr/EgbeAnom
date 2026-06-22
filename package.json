@@ -1,0 +1,13 @@
+{
+  "name": "egbeanom-supabase-tools",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "apply-schema": "node scripts/apply-supabase-schema.js supabase/schema.sql",
+    "build-web": "cd egbeanom && flutter build web --dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co --dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRldnRlY2tueHBnZGhia2RqbnZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTkzNjgsImV4cCI6MjA5NzIzNTM2OH0.yyBLbTrdXtanXmI_AB2BcbBoKAGDuWcod5C5DFvudoE --dart-define=SUPABASE_PRODUCT_BUCKET=product-images",
+    "upload-supabase-product-images": "node scripts/upload-supabase-product-images.js"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
+}

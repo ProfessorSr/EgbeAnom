@@ -1,6 +1,9 @@
 # Miscellaneous
 *.class
 *.log
+.env
+.env.local
+.env.*.local
 *.pyc
 *.swp
 .DS_Store

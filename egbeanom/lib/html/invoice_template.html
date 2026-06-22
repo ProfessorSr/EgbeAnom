@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Invoice - {{invoice_number}}</title>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 30px;
+      background: #f3efe8;
+      font-family: Arial, sans-serif;
+      color: #111;
+    }
+
+    .invoice {
+      max-width: 900px;
+      margin: auto;
+      background: #fff;
+      border: 1px solid #c89b3c;
+      box-shadow: 0 10px 35px rgba(0,0,0,.15);
+    }
+
+    .header {
+      background: #050505;
+      color: white;
+      padding: 35px;
+      display: grid;
+      grid-template-columns: 170px 1fr 220px;
+      gap: 25px;
+      align-items: center;
+      border-bottom: 5px solid #c89b3c;
+    }
+
+    .logo {
+      width: 145px;
+      height: 145px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .brand h1 {
+      margin: 0;
+      color: #d4af37;
+      font-family: Georgia, serif;
+      font-size: 44px;
+    }
+
+    .brand .sub {
+      color: #d4af37;
+      letter-spacing: 10px;
+      font-size: 17px;
+      margin-top: 8px;
+    }
+
+    .brand p {
+      color: #fff;
+      margin-top: 18px;
+      font-size: 16px;
+    }
+
+    .invoice-meta h2 {
+      margin: 0 0 20px;
+      color: #d4af37;
+      font-family: Georgia, serif;
+      font-size: 42px;
+      text-align: right;
+    }
+
+    .invoice-meta div {
+      text-align: right;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    .section {
+      padding: 35px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 45px;
+    }
+
+    .label {
+      color: #b8860b;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .details {
+      line-height: 1.7;
+      color: #333;
+      font-size: 15px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .items th {
+      background: #050505;
+      color: #d4af37;
+      padding: 14px;
+      text-align: left;
+      font-size: 14px;
+      text-transform: uppercase;
+    }
+
+    .items td {
+      padding: 14px;
+      border-bottom: 1px solid #e2d3b2;
+      vertical-align: middle;
+      font-size: 15px;
+    }
+
+    .product {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .product img {
+      width: 48px;
+      height: 58px;
+      object-fit: contain;
+      border: 1px solid #e2d3b2;
+      background: #fff;
+    }
+
+    .product-name {
+      font-weight: bold;
+    }
+
+    .product-type {
+      font-size: 13px;
+      color: #666;
+      font-style: italic;
+      margin-top: 3px;
+    }
+
+    .right {
+      text-align: right;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    .summary {
+      display: flex;
+      justify-content: flex-end;
+      padding: 0 35px 35px;
+    }
+
+    .totals {
+      width: 340px;
+      border: 1px solid #d4af37;
+    }
+
+    .totals div {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 18px;
+      border-bottom: 1px solid #eadbb8;
+      font-size: 15px;
+    }
+
+    .totals .grand {
+      background: #050505;
+      color: #d4af37;
+      font-size: 24px;
+      font-weight: bold;
+      border-bottom: none;
+    }
+
+    .thank-you {
+      padding: 0 35px 35px;
+    }
+
+    .thank-you h3 {
+      margin: 0;
+      color: #b8860b;
+      font-family: Georgia, serif;
+      font-size: 32px;
+      font-style: italic;
+    }
+
+    .footer {
+      background: #050505;
+      color: white;
+      padding: 28px 35px;
+      border-top: 5px solid #c89b3c;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 25px;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .footer strong {
+      color: #d4af37;
+    }
+
+    .footer-bottom {
+      grid-column: 1 / -1;
+      text-align: center;
+      color: #d4af37;
+      border-top: 1px solid #c89b3c;
+      padding-top: 18px;
+      margin-top: 10px;
+      font-family: Georgia, serif;
+      font-size: 16px;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        padding: 0;
+      }
+
+      .invoice {
+        box-shadow: none;
+        border: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="invoice">
+
+    <div class="header">
+      <img class="logo" src="{{company_logo_url}}" alt="EgbeAnom Logo" />
+
+      <div class="brand">
+        <h1>{{company_name}}</h1>
+        <div class="sub">FRAGRANCE</div>
+        <p>{{company_tagline}}</p>
+      </div>
+
+      <div class="invoice-meta">
+        <h2>INVOICE</h2>
+        <div>
+          <strong>Invoice #:</strong> {{invoice_number}}<br />
+          <strong>Date:</strong> {{invoice_date}}<br />
+          <strong>Due Date:</strong> {{due_date}}
+        </div>
+      </div>
+    </div>
+
+    <div class="section two-col">
+      <div>
+        <div class="label">Bill To</div>
+        <div class="details">
+          <strong>{{customer_name}}</strong><br />
+          {{customer_address_line_1}}<br />
+          {{customer_city_state_zip}}<br />
+          {{customer_country}}<br />
+          {{customer_email}}<br />
+          {{customer_phone}}
+        </div>
+      </div>
+
+      <div>
+        <div class="label">From</div>
+        <div class="details">
+          <strong>{{company_name}}</strong><br />
+          {{company_address_line_1}}<br />
+          {{company_city_state_zip}}<br />
+          {{company_country}}<br />
+          {{company_email}}<br />
+          {{company_phone}}<br />
+          {{company_website}}
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <table class="items">
+        <thead>
+          <tr>
+            <th>Item Description</th>
+            <th class="center">Qty</th>
+            <th class="right">Unit Price</th>
+            <th class="right">Total</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <!-- LOOP invoice_items FROM DATABASE -->
+          <tr>
+            <td>
+              <div class="product">
+                <img src="{{item_image_url}}" alt="{{item_name}}" />
+                <div>
+                  <div class="product-name">{{item_name}}</div>
+                  <div class="product-type">{{item_description}}</div>
+                </div>
+              </div>
+            </td>
+            <td class="center">{{item_quantity}}</td>
+            <td class="right">{{item_unit_price}}</td>
+            <td class="right">{{item_line_total}}</td>
+          </tr>
+          <!-- END LOOP -->
+        </tbody>
+      </table>
+    </div>
+
+    <div class="summary">
+      <div class="totals">
+        <div>
+          <span>Subtotal</span>
+          <span>{{subtotal}}</span>
+        </div>
+        <div>
+          <span>Shipping</span>
+          <span>{{shipping}}</span>
+        </div>
+        <div>
+          <span>Tax</span>
+          <span>{{tax}}</span>
+        </div>
+        <div class="grand">
+          <span>Total</span>
+          <span>{{grand_total}}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="thank-you">
+      <h3>Thank you</h3>
+      <p>Thank you for choosing {{company_name}}.</p>
+    </div>
+
+    <div class="footer">
+      <div>
+        <strong>{{company_name}}</strong><br />
+        {{company_address_line_1}}<br />
+        {{company_city_state_zip}}<br />
+        {{company_country}}
+      </div>
+
+      <div>
+        <strong>Customer Support</strong><br />
+        {{company_email}}<br />
+        {{company_phone}}<br />
+        {{company_website}}
+      </div>
+
+      <div>
+        <strong>Follow Us</strong><br />
+        Instagram: {{instagram_handle}}<br />
+        Facebook: {{facebook_handle}}<br />
+        TikTok: {{tiktok_handle}}
+      </div>
+
+      <div class="footer-bottom">
+        {{company_tagline}}
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

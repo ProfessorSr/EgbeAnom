@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>EgbeAnom Invoice</title>
+</head>
+
+<body style="margin:0;padding:20px;background:#f4f1eb;font-family:Arial,sans-serif;">
+
+<table width="800" align="center" cellpadding="0" cellspacing="0"
+       style="background:#ffffff;border:1px solid #d4af37;">
+
+    <!-- HEADER -->
+    <tr>
+        <td style="background:#050505;padding:30px;">
+
+            <table width="100%">
+                <tr>
+
+                    <td width="180" align="center">
+                        <img src="YOUR_LOGO_URL"
+                             width="140"
+                             style="display:block;border-radius:50%;">
+                    </td>
+
+                    <td align="center">
+                        <h1 style="margin:0;color:#d4af37;font-family:Georgia,serif;font-size:42px;">
+                            EgbeAnom
+                        </h1>
+
+                        <div style="color:#d4af37;
+                                    letter-spacing:8px;
+                                    font-size:18px;
+                                    margin-top:8px;">
+                            FRAGRANCE
+                        </div>
+
+                        <div style="margin-top:20px;
+                                    color:#ffffff;
+                                    font-size:18px;">
+                            Where Elegance Speaks. Scents Last Forever.
+                        </div>
+                    </td>
+
+                    <td width="180" align="right" valign="top">
+
+                        <div style="color:#d4af37;
+                                    font-size:42px;
+                                    font-family:Georgia,serif;
+                                    font-weight:bold;">
+                            INVOICE
+                        </div>
+
+                        <div style="margin-top:25px;
+                                    color:#ffffff;
+                                    font-size:14px;
+                                    line-height:1.8;">
+                            <strong>Invoice #:</strong> {{invoice_number}}<br>
+                            <strong>Date:</strong> {{invoice_date}}<br>
+                            <strong>Due:</strong> {{due_date}}
+                        </div>
+
+                    </td>
+
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- CUSTOMER INFO -->
+    <tr>
+        <td style="padding:35px;">
+
+            <table width="100%">
+                <tr>
+
+                    <td width="50%" valign="top">
+
+                        <h3 style="margin:0;color:#b8860b;">
+                            BILL TO
+                        </h3>
+
+                        <div style="margin-top:15px;
+                                    line-height:1.8;
+                                    color:#333333;">
+                            {{customer_name}}<br>
+                            {{customer_address}}<br>
+                            {{customer_city}}<br>
+                            {{customer_email}}<br>
+                            {{customer_phone}}
+                        </div>
+
+                    </td>
+
+                    <td width="50%" valign="top">
+
+                        <h3 style="margin:0;color:#b8860b;">
+                            FROM
+                        </h3>
+
+                        <div style="margin-top:15px;
+                                    line-height:1.8;
+                                    color:#333333;">
+                            EgbeAnom Fragrance<br>
+                            support@egbeanom.com<br>
+                            www.egbeanom.com
+                        </div>
+
+                    </td>
+
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- ITEMS TABLE -->
+    <tr>
+        <td style="padding:0 35px 35px 35px;">
+
+            <table width="100%"
+                   cellpadding="12"
+                   cellspacing="0"
+                   style="border-collapse:collapse;">
+
+                <tr style="background:#050505;color:#d4af37;">
+                    <th align="left">Item</th>
+                    <th align="center">Qty</th>
+                    <th align="right">Price</th>
+                    <th align="right">Total</th>
+                </tr>
+
+                <!-- ITEM ROW -->
+                <tr>
+                    <td style="border-bottom:1px solid #dddddd;">
+                        {{item_name}}
+                    </td>
+                    <td align="center"
+                        style="border-bottom:1px solid #dddddd;">
+                        {{qty}}
+                    </td>
+                    <td align="right"
+                        style="border-bottom:1px solid #dddddd;">
+                        {{price}}
+                    </td>
+                    <td align="right"
+                        style="border-bottom:1px solid #dddddd;">
+                        {{line_total}}
+                    </td>
+                </tr>
+
+                <!-- Repeat item rows -->
+
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- TOTALS -->
+    <tr>
+        <td style="padding:0 35px 35px 35px;">
+
+            <table width="300" align="right">
+
+                <tr>
+                    <td>Subtotal</td>
+                    <td align="right">{{subtotal}}</td>
+                </tr>
+
+                <tr>
+                    <td>Shipping</td>
+                    <td align="right">{{shipping}}</td>
+                </tr>
+
+                <tr>
+                    <td>Tax</td>
+                    <td align="right">{{tax}}</td>
+                </tr>
+
+                <tr>
+                    <td colspan="2">
+                        <hr style="border:none;border-top:1px solid #d4af37;">
+                    </td>
+                </tr>
+
+                <tr style="background:#050505;">
+                    <td style="padding:15px;
+                               color:#d4af37;
+                               font-size:22px;
+                               font-weight:bold;">
+                        TOTAL
+                    </td>
+
+                    <td align="right"
+                        style="padding:15px;
+                               color:#d4af37;
+                               font-size:22px;
+                               font-weight:bold;">
+                        {{grand_total}}
+                    </td>
+                </tr>
+
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- THANK YOU -->
+    <tr>
+        <td style="padding:0 35px 40px 35px;">
+
+            <div style="font-size:32px;
+                        color:#b8860b;
+                        font-family:Georgia,serif;">
+                Thank You
+            </div>
+
+            <div style="margin-top:10px;
+                        color:#444444;">
+                Thank you for choosing EgbeAnom Fragrance.
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- FOOTER -->
+    <tr>
+        <td style="background:#050505;
+                   padding:25px;
+                   text-align:center;
+                   border-top:4px solid #d4af37;">
+
+            <div style="color:#d4af37;
+                        font-size:16px;
+                        margin-bottom:10px;">
+                Where Elegance Speaks. Scents Last Forever.
+            </div>
+
+            <div style="color:#ffffff;
+                        font-size:13px;">
+                support@egbeanom.com |
+                www.egbeanom.com
+            </div>
+
+        </td>
+    </tr>
+
+</table>
+
+</body>
+</html>

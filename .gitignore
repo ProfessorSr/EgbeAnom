@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+
+# Local hosting/database secrets and generated migration payloads.
+godaddy/api/config.php
+godaddy/mysql/export*.json
+*.sql.gz
