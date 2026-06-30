@@ -20,6 +20,24 @@ void downloadTextFile({
   html.Url.revokeObjectUrl(url);
 }
 
+void downloadBase64File({
+  required String fileName,
+  required String base64Contents,
+  required String mimeType,
+}) {
+  final blob = html.Blob([
+    base64Decode(base64Contents),
+  ], mimeType);
+  final url = html.Url.createObjectUrlFromBlob(blob);
+  final anchor = html.AnchorElement(href: url)
+    ..download = fileName
+    ..style.display = 'none';
+  html.document.body?.append(anchor);
+  anchor.click();
+  anchor.remove();
+  html.Url.revokeObjectUrl(url);
+}
+
 void printTextDocument(String title, String contents) {
   final escapedTitle = htmlEscape.convert(title);
   final escapedContents = htmlEscape.convert(contents);
@@ -45,11 +63,13 @@ void printHtmlDocument(String title, String htmlContents) {
     font-size: 12px;
     line-height: 1.45;
   }
-  .egbeanom-print-page {
+  .egbeanom-print-page,
+  .egbeanom-page-break {
     break-after: page;
     page-break-after: always;
   }
-  .egbeanom-print-page:last-child {
+  .egbeanom-print-page:last-child,
+  .egbeanom-page-break:last-child {
     break-after: auto;
     page-break-after: auto;
   }

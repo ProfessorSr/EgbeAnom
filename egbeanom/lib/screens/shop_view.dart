@@ -176,21 +176,31 @@ class _HomeBanner extends StatelessWidget {
           padding: const EdgeInsets.all(28),
           child: Align(
             alignment: Alignment.bottomLeft,
-            child: OutlinedButton(
-              onPressed: onOpenCatalog,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Color(0xFFC88F52), width: 1.2),
-                backgroundColor: Colors.black26,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 14,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6),
+            child: FractionallySizedBox(
+              alignment: Alignment.bottomLeft,
+              widthFactor: 0.52,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: OutlinedButton(
+                  onPressed: onOpenCatalog,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(
+                      color: Color(0xFFC88F52),
+                      width: 1.2,
+                    ),
+                    backgroundColor: Colors.black26,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  child: const Text('Explore Collection -->'),
                 ),
               ),
-              child: const Text('Explore Collection -->'),
             ),
           ),
         ),
@@ -304,7 +314,8 @@ class _HomeSearchBarState extends State<_HomeSearchBar> {
             TextField(
               controller: _controller,
               decoration: InputDecoration(
-                labelText: 'Search by fragrance, note, family, or occasion',
+                labelText:
+                    'Search by fragrance, note, vibe, season, or occasion',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   tooltip: 'Search catalog',
@@ -480,7 +491,7 @@ class _DiscoveryBar extends StatelessWidget {
                           ),
                         decoration: const InputDecoration(
                           labelText:
-                              'Search by fragrance, note, family, or occasion',
+                              'Search by fragrance, note, vibe, season, or occasion',
                           prefixIcon: Icon(Icons.search),
                         ),
                         onChanged: onQueryChanged,
@@ -709,7 +720,7 @@ class _FragranceFinderState extends State<_FragranceFinder> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              Text(match.description, maxLines: 3),
+                              Text(_matchSummary(match), maxLines: 3),
                               const SizedBox(height: 12),
                               FilledButton.icon(
                                 onPressed: () => widget.onViewDetails(match),
@@ -736,7 +747,7 @@ class _FragranceFinderState extends State<_FragranceFinder> {
       ..sort((a, b) {
         int score(Fragrance product) {
           final haystack =
-              '${product.notes} ${product.topNotes} ${product.heartNotes} ${product.baseNotes} ${product.occasion} ${product.season} ${product.family}'
+              '${product.name} ${product.type} ${product.brand} ${product.description} ${product.vibe} ${product.performance} ${product.comparison} ${product.fragranceProfile} ${product.ingredients} ${product.notes} ${product.topNotes} ${product.heartNotes} ${product.baseNotes} ${product.occasion} ${product.season} ${product.family} ${product.concentration} ${product.gender}'
                   .toLowerCase();
           var value = 0;
           for (final term in _moodTerms[_mood] ?? const <String>[]) {
@@ -772,6 +783,23 @@ class _FragranceFinderState extends State<_FragranceFinder> {
         return score(b).compareTo(score(a));
       });
     return scored.first;
+  }
+
+  String _matchSummary(Fragrance product) {
+    for (final value in [
+      product.description,
+      product.vibe,
+      product.fragranceProfile,
+      product.performance,
+      product.comparison,
+      product.notes,
+    ]) {
+      final clean = value.trim();
+      if (clean.isNotEmpty) {
+        return clean;
+      }
+    }
+    return 'Open the fragrance details to review notes, seasons, occasions, and performance.';
   }
 
   static const _moodTerms = {

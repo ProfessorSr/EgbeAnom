@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
+import 'package:egbeanom/services/shipping_rate_gateway.dart';
+
 class StoreDataGateway {
   const StoreDataGateway();
 
@@ -17,10 +19,6 @@ class StoreDataGateway {
   static const _accessTokenKey = 'egbeanom.supabase.access_token';
   static const _refreshTokenKey = 'egbeanom.supabase.refresh_token';
   static final Set<String> _missingLiveColumns = {};
-  static const _fallbackAdminEmails = {
-    'calvin.fowler74@gmail.com',
-    'collinsegbe83@gmail.com',
-  };
 
   String? get _accessToken => html.window.localStorage[_accessTokenKey];
   String? get _refreshToken => html.window.localStorage[_refreshTokenKey];
@@ -91,6 +89,11 @@ class StoreDataGateway {
       _setting('storefront_status');
   Future<Map<String, dynamic>?> fetchEmailServerSettings() =>
       _setting('email_server_settings');
+  Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() =>
+      _setting('shipping_carrier_credentials');
+  Future<Map<String, dynamic>?> fetchShippingCarrierCredentialsForCarrier(
+    String carrier,
+  ) => _setting(_shippingCarrierCredentialsKey(carrier));
   Future<Map<String, dynamic>?> fetchStoreInfo() async {
     final data = await _rest(
       'store_info',
@@ -183,8 +186,36 @@ class StoreDataGateway {
     }
   }
 
-  Future<void> upsertCouponRule(Map<String, dynamic> coupon) =>
-      _upsert('coupon_rules', coupon);
+  Future<Map<String, dynamic>?> upsertCouponRule(
+    Map<String, dynamic> coupon,
+  ) async {
+    final row = Map<String, dynamic>.from(coupon)..remove('id');
+    try {
+      await _rest(
+        'coupon_rules',
+        method: 'POST',
+        query: {'on_conflict': 'code'},
+        body: row,
+        prefer: 'resolution=merge-duplicates',
+        returnRepresentation: false,
+      );
+    } catch (error) {
+      if (!_isBrowserReadableResponseFailure(error)) {
+        rethrow;
+      }
+    }
+    final code = '${row['code'] ?? ''}'.trim();
+    if (code.isEmpty) {
+      return null;
+    }
+    final data = await _rest(
+      'coupon_rules',
+      query: {'select': '*', 'code': 'eq.$code', 'limit': '1'},
+    );
+    final rows = _rows(data);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<void> upsertFragranceNote(Map<String, dynamic> note) =>
       _upsert('fragrance_notes', note);
   Future<void> upsertPaymentMethod(Map<String, dynamic> method) =>
@@ -207,6 +238,10 @@ class StoreDataGateway {
       _upsert('store_info', info);
   Future<void> upsertTaxRule(Map<String, dynamic> rule) =>
       _upsert('tax_rules', rule);
+  Future<void> deleteTaxRule(String ruleId) async {
+    await _rest('tax_rules', method: 'DELETE', query: {'id': 'eq.$ruleId'});
+  }
+
   Future<void> insertOrderItems(List<Map<String, dynamic>> items) async {
     if (items.isNotEmpty) {
       await _insert('order_items', items);
@@ -368,7 +403,13 @@ class StoreDataGateway {
       profile['auth_user_id'] = user['id'];
     }
     profile['last_login_at'] = DateTime.now().toUtc().toIso8601String();
-    await _upsertProfile('backend_users', profile);
+    try {
+      await _upsertProfile('backend_users', profile);
+    } catch (_) {
+      // The auth session is already stored and the backend profile has been
+      // verified. Do not fail login just because the best-effort last-login
+      // profile update was blocked by browser response/CORS handling.
+    }
     return profile;
   }
 
@@ -440,24 +481,8 @@ class StoreDataGateway {
     Map<String, dynamic>? user,
     String email,
   ) {
-    final cleanEmail = email.trim().toLowerCase();
-    if (!_fallbackAdminEmails.contains(cleanEmail)) {
-      return null;
-    }
-    final isCollins = cleanEmail == 'collinsegbe83@gmail.com';
-    return {
-      'id': isCollins ? 'ADM-COLLINSEGBE83' : 'ADM-CALVIN',
-      'auth_user_id': user == null ? null : user['id'],
-      'name': user != null && user['user_metadata'] is Map
-          ? (user['user_metadata']['name'] ??
-                (isCollins ? 'Collins Egbe' : 'Calvin Fowler'))
-          : (isCollins ? 'Collins Egbe' : 'Calvin Fowler'),
-      'email': cleanEmail,
-      'role': 'owner',
-      'is_active': true,
-      'is_blocked': false,
-      'last_login_at': DateTime.now().toUtc().toIso8601String(),
-    };
+    // No fallback profiles - require explicit backend_users table entry for admin access
+    return null;
   }
 
   Map<String, dynamic> _fallbackCustomerProfile(
@@ -512,8 +537,189 @@ class StoreDataGateway {
     'site_settings',
     {'key': 'email_server_settings', 'value': value, 'is_public': false},
   );
+  Future<void> upsertShippingCarrierCredentials(Map<String, dynamic> value) =>
+      _upsert('site_settings', {
+        'key': 'shipping_carrier_credentials',
+        'value': value,
+        'is_public': false,
+      });
+  Future<void> upsertShippingCarrierCredentialsForCarrier(
+    String carrier,
+    Map<String, dynamic> value,
+  ) => _upsert('site_settings', {
+    'key': _shippingCarrierCredentialsKey(carrier),
+    'value': value,
+    'is_public': false,
+  });
+
+  Future<Map<String, dynamic>?> fetchPaymentProcessorCredentials(
+    String provider,
+  ) => _setting(_paymentProcessorCredentialsKey(provider));
+
+  Future<void> upsertPaymentProcessorCredentials(
+    String provider,
+    Map<String, dynamic> value,
+  ) => _upsert('site_settings', {
+    'key': _paymentProcessorCredentialsKey(provider),
+    'value': value,
+    'is_public': false,
+  });
+
+  /// Fetch encrypted payment processor credentials from vault
+  /// Uses encrypted_credentials table with pgcrypto encryption
+  Future<Map<String, dynamic>?> fetchEncryptedPaymentCredentials(
+    String provider, {
+    String? encryptionKey,
+  }) async {
+    try {
+      // If encryption key not provided, skip encrypted fetch
+      if (encryptionKey == null || encryptionKey.isEmpty) {
+        return null;
+      }
+
+      // Call RPC function to get encrypted credential
+      final response = await _rest(
+        'rpc/get_encrypted_credential',
+        method: 'POST',
+        body: {
+          'p_provider_type': 'payment_processor',
+          'p_provider_name': provider.toLowerCase().trim(),
+          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+        },
+      );
+
+      if (response is! Map) {
+        return null;
+      }
+
+      final jsonStr = response['p_decrypted'] ?? response;
+      return jsonStr is String ? jsonDecode(jsonStr) : jsonStr;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Store encrypted payment processor credentials in vault
+  Future<void> upsertEncryptedPaymentCredentials(
+    String provider,
+    Map<String, dynamic> credentials, {
+    required String encryptionKey,
+  }) async {
+    try {
+      // Call RPC function to store encrypted credential
+      await _rest(
+        'rpc/upsert_encrypted_credential',
+        method: 'POST',
+        body: {
+          'p_provider_type': 'payment_processor',
+          'p_provider_name': provider.toLowerCase().trim(),
+          'p_credentials_json': jsonEncode(credentials),
+          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+        },
+      );
+    } catch (error) {
+      throw Exception('Failed to store encrypted credentials: $error');
+    }
+  }
+
+  /// Fetch encrypted shipping carrier credentials from vault
+  Future<Map<String, dynamic>?> fetchEncryptedShippingCredentials(
+    String carrier, {
+    String? encryptionKey,
+  }) async {
+    try {
+      if (encryptionKey == null || encryptionKey.isEmpty) {
+        return null;
+      }
+
+      final response = await _rest(
+        'rpc/get_encrypted_credential',
+        method: 'POST',
+        body: {
+          'p_provider_type': 'shipping_carrier',
+          'p_provider_name': carrier.toLowerCase().trim(),
+          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+        },
+      );
+
+      if (response is! Map) {
+        return null;
+      }
+
+      final jsonStr = response['p_decrypted'] ?? response;
+      return jsonStr is String ? jsonDecode(jsonStr) : jsonStr;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Store encrypted shipping carrier credentials in vault
+  Future<void> upsertEncryptedShippingCredentials(
+    String carrier,
+    Map<String, dynamic> credentials, {
+    required String encryptionKey,
+  }) async {
+    try {
+      await _rest(
+        'rpc/upsert_encrypted_credential',
+        method: 'POST',
+        body: {
+          'p_provider_type': 'shipping_carrier',
+          'p_provider_name': carrier.toLowerCase().trim(),
+          'p_credentials_json': jsonEncode(credentials),
+          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+        },
+      );
+    } catch (error) {
+      throw Exception('Failed to store encrypted shipping credentials: $error');
+    }
+  }
+
+  /// Get encryption key from environment (should be set in deployment)
+  static String? getEncryptionKeyFromEnvironment() {
+    return String.fromEnvironment('ENCRYPTION_KEY', defaultValue: '').isEmpty
+        ? null
+        : String.fromEnvironment('ENCRYPTION_KEY');
+  }
+
   Future<void> upsertBackendUser(Map<String, dynamic> user) =>
       _upsert('backend_users', user..remove('password'));
+
+  Future<List<ShippingRateQuote>> quoteShippingRates(
+    ShippingRateRequest request,
+  ) async {
+    final response = await _function(
+      'usps-shipping',
+      body: {'action': 'quoteRates', 'request': request.toJson()},
+    );
+    final quotes = response['quotes'];
+    if (quotes is! List) {
+      return const [];
+    }
+    return quotes
+        .whereType<Map>()
+        .map(
+          (quote) => ShippingRateQuote.fromJson(quote.cast<String, dynamic>()),
+        )
+        .toList();
+  }
+
+  Future<ShippingLabelResult> createUspsLabel({
+    required Map<String, dynamic> order,
+    required Map<String, dynamic> storeInfo,
+    required Map<String, dynamic> package,
+  }) async {
+    final response = await _function(
+      'usps-shipping',
+      body: {
+        'action': 'createLabel',
+        'order': order,
+        'storeInfo': storeInfo,
+        'package': package,
+      },
+    );
+    return ShippingLabelResult.fromJson(response);
+  }
 
   Future<Map<String, dynamic>?> _profileForAuthUser({
     required String table,
@@ -739,12 +945,27 @@ class StoreDataGateway {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<void> _upsert(String table, Map<String, dynamic> row) async {
+  String _shippingCarrierCredentialsKey(String carrier) {
+    final normalized = carrier.trim().toLowerCase();
+    return 'shipping_carrier_credentials_$normalized';
+  }
+
+  String _paymentProcessorCredentialsKey(String provider) {
+    final normalized = provider.trim().toLowerCase();
+    return 'payment_processor_credentials_$normalized';
+  }
+
+  Future<void> _upsert(
+    String table,
+    Map<String, dynamic> row, {
+    bool returnRepresentation = true,
+  }) async {
     await _rest(
       table,
       method: 'POST',
       body: row,
       prefer: 'resolution=merge-duplicates',
+      returnRepresentation: returnRepresentation,
     );
   }
 
@@ -758,6 +979,7 @@ class StoreDataGateway {
     Map<String, String>? query,
     Object? body,
     String? prefer,
+    bool returnRepresentation = true,
   }) async {
     _ensureConfigured();
     final uri = Uri.parse(
@@ -768,7 +990,8 @@ class StoreDataGateway {
       'Authorization': 'Bearer ${_accessToken ?? _supabaseAnonKey}',
       if (method != 'GET') 'Content-Type': 'application/json',
       if (method == 'POST' || method == 'PATCH')
-        'Prefer': '${prefer == null ? '' : '$prefer,'}return=representation',
+        'Prefer':
+            '${prefer == null ? '' : '$prefer,'}return=${returnRepresentation ? 'representation' : 'minimal'}',
     };
     late final html.HttpRequest request;
     try {
@@ -784,6 +1007,34 @@ class StoreDataGateway {
       );
     }
     return _decodeResponse(request, 'Supabase request failed');
+  }
+
+  Future<Map<String, dynamic>> _function(
+    String name, {
+    required Map<String, dynamic> body,
+  }) async {
+    _ensureConfigured();
+    late final html.HttpRequest request;
+    try {
+      request = await html.HttpRequest.request(
+        '$_supabaseUrl/functions/v1/$name',
+        method: 'POST',
+        requestHeaders: {
+          'apikey': _supabaseAnonKey,
+          'Authorization': 'Bearer ${_accessToken ?? _supabaseAnonKey}',
+          'Content-Type': 'application/json',
+        },
+        sendData: jsonEncode(body),
+      ).timeout(const Duration(seconds: 45));
+    } catch (error) {
+      throw StateError(
+        _networkFailureMessage('Supabase function $name', error),
+      );
+    }
+    final decoded = _decodeResponse(request, 'Supabase function $name failed');
+    return decoded is Map
+        ? decoded.cast<String, dynamic>()
+        : <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>?> _currentAuthUser() async {
@@ -868,6 +1119,12 @@ class StoreDataGateway {
           'full debug restart.';
     }
     return '$label request failed before a response was received: $raw';
+  }
+
+  bool _isBrowserReadableResponseFailure(Object error) {
+    final raw = '$error';
+    return raw.contains('did not return a browser-readable response') ||
+        raw.contains('request failed before a response was received');
   }
 
   dynamic _decodeResponse(html.HttpRequest request, String label) {

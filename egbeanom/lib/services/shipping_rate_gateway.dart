@@ -20,6 +20,17 @@ class ShippingRateRequest {
   final double lengthIn;
   final double widthIn;
   final double heightIn;
+
+  Map<String, dynamic> toJson() => {
+    'carrier': carrier,
+    'service': service,
+    'originZip': originZip,
+    'destinationZip': destinationZip,
+    'weightOz': weightOz,
+    'lengthIn': lengthIn,
+    'widthIn': widthIn,
+    'heightIn': heightIn,
+  };
 }
 
 class ShippingCarrierCredentials {
@@ -46,6 +57,32 @@ class ShippingCarrierCredentials {
       accountNumber.isNotEmpty ||
       apiKey.isNotEmpty ||
       clientId.isNotEmpty;
+
+  factory ShippingCarrierCredentials.fromJson(Object? value) {
+    if (value is Map) {
+      final data = value.cast<Object?, Object?>();
+      return ShippingCarrierCredentials(
+        customerId: '${data['customer_id'] ?? ''}'.trim(),
+        accountNumber: '${data['account_number'] ?? ''}'.trim(),
+        apiKey: '${data['api_key'] ?? ''}'.trim(),
+        apiSecret: '${data['api_secret'] ?? ''}'.trim(),
+        meterNumber: '${data['meter_number'] ?? ''}'.trim(),
+        clientId: '${data['client_id'] ?? ''}'.trim(),
+        clientSecret: '${data['client_secret'] ?? ''}'.trim(),
+      );
+    }
+    return const ShippingCarrierCredentials();
+  }
+
+  Map<String, dynamic> toJson() => {
+    'customer_id': customerId,
+    'account_number': accountNumber,
+    'api_key': apiKey,
+    'api_secret': apiSecret,
+    'meter_number': meterNumber,
+    'client_id': clientId,
+    'client_secret': clientSecret,
+  };
 }
 
 class ShippingRateQuote {
@@ -62,6 +99,51 @@ class ShippingRateQuote {
   final double amount;
   final String currency;
   final String estimatedDays;
+
+  factory ShippingRateQuote.fromJson(Map<String, dynamic> json) {
+    return ShippingRateQuote(
+      carrier: '${json['carrier'] ?? ''}',
+      service: '${json['service'] ?? ''}',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      currency: '${json['currency'] ?? 'USD'}',
+      estimatedDays: '${json['estimatedDays'] ?? ''}',
+    );
+  }
+}
+
+class ShippingLabelResult {
+  const ShippingLabelResult({
+    required this.trackingNumber,
+    required this.labelStatus,
+    required this.labelFileName,
+    required this.labelContentType,
+    required this.labelBase64,
+    this.trackingUrl = '',
+    this.postage = 0,
+    this.estimatedDays = '',
+  });
+
+  final String trackingNumber;
+  final String labelStatus;
+  final String labelFileName;
+  final String labelContentType;
+  final String labelBase64;
+  final String trackingUrl;
+  final double postage;
+  final String estimatedDays;
+
+  factory ShippingLabelResult.fromJson(Map<String, dynamic> json) {
+    return ShippingLabelResult(
+      trackingNumber: '${json['trackingNumber'] ?? ''}',
+      labelStatus: '${json['labelStatus'] ?? 'Label created'}',
+      labelFileName: '${json['labelFileName'] ?? 'usps-label.pdf'}',
+      labelContentType: '${json['labelContentType'] ?? 'application/pdf'}',
+      labelBase64: '${json['labelBase64'] ?? ''}',
+      trackingUrl: '${json['trackingUrl'] ?? ''}',
+      postage: (json['postage'] as num?)?.toDouble() ?? 0,
+      estimatedDays: '${json['estimatedDays'] ?? ''}',
+    );
+  }
 }
 
 class ShippingRateGateway {
@@ -168,14 +250,6 @@ class ShippingRateGateway {
     // Keep secrets and carrier calls server-side. The encoded payload lets the
     // backend adapter log exactly what would be sent once credentials are added.
     jsonEncode(payload);
-    return [
-      ShippingRateQuote(
-        carrier: carrier,
-        service: request.service,
-        amount: 0,
-        currency: 'USD',
-        estimatedDays: 'Carrier-calculated after credentials are connected',
-      ),
-    ];
+    return const [];
   }
 }

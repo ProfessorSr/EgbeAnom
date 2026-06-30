@@ -202,6 +202,12 @@ class CheckoutView extends StatelessWidget {
     required this.tax,
     required this.shipping,
     required this.total,
+    required this.checkoutEmail,
+    required this.checkoutPhone,
+    required this.shippingAddress,
+    required this.onCheckoutEmailChanged,
+    required this.onCheckoutPhoneChanged,
+    required this.onShippingAddressChanged,
     required this.shippingOptions,
     required this.selectedShippingOptionId,
     required this.onShippingOptionChanged,
@@ -215,6 +221,12 @@ class CheckoutView extends StatelessWidget {
   final double tax;
   final double shipping;
   final double total;
+  final String checkoutEmail;
+  final String checkoutPhone;
+  final ShippingAddress shippingAddress;
+  final ValueChanged<String> onCheckoutEmailChanged;
+  final ValueChanged<String> onCheckoutPhoneChanged;
+  final ValueChanged<ShippingAddress> onShippingAddressChanged;
   final List<ShippingOption> shippingOptions;
   final String selectedShippingOptionId;
   final ValueChanged<String> onShippingOptionChanged;
@@ -256,29 +268,17 @@ class CheckoutView extends StatelessWidget {
                       flex: wide ? 7 : 0,
                       child: Column(
                         children: [
-                          const _CheckoutSection(
-                            title: 'Contact',
-                            icon: Icons.email_outlined,
-                            children: [
-                              TextField(
-                                decoration: InputDecoration(
-                                  labelText: 'Email address',
-                                  prefixIcon: Icon(Icons.email_outlined),
-                                ),
-                                keyboardType: TextInputType.emailAddress,
-                              ),
-                              SizedBox(height: 10),
-                              TextField(
-                                decoration: InputDecoration(
-                                  labelText: 'Phone number',
-                                  prefixIcon: Icon(Icons.phone_outlined),
-                                ),
-                                keyboardType: TextInputType.phone,
-                              ),
-                            ],
+                          _CheckoutContactSection(
+                            email: checkoutEmail,
+                            phone: checkoutPhone,
+                            onEmailChanged: onCheckoutEmailChanged,
+                            onPhoneChanged: onCheckoutPhoneChanged,
                           ),
                           const SizedBox(height: 14),
-                          const _CheckoutAddressForms(),
+                          _CheckoutAddressForms(
+                            shippingAddress: shippingAddress,
+                            onShippingAddressChanged: onShippingAddressChanged,
+                          ),
                           const SizedBox(height: 14),
                           _CheckoutSection(
                             title: 'Delivery',
@@ -286,7 +286,7 @@ class CheckoutView extends StatelessWidget {
                             children: [
                               if (shippingOptions.isEmpty)
                                 const Text(
-                                  'Shipping is being confirmed by the store team.',
+                                  'No enabled shipping options are configured.',
                                 )
                               else
                                 for (final option in shippingOptions)
@@ -356,7 +356,13 @@ class CheckoutView extends StatelessWidget {
 }
 
 class _CheckoutAddressForms extends StatefulWidget {
-  const _CheckoutAddressForms();
+  const _CheckoutAddressForms({
+    required this.shippingAddress,
+    required this.onShippingAddressChanged,
+  });
+
+  final ShippingAddress shippingAddress;
+  final ValueChanged<ShippingAddress> onShippingAddressChanged;
 
   @override
   State<_CheckoutAddressForms> createState() => _CheckoutAddressFormsState();
@@ -383,7 +389,11 @@ class _CheckoutAddressFormsState extends State<_CheckoutAddressForms> {
                 'Send to a recipient at a different address.',
               ),
             ),
-            _AddressFields(prefix: _gift ? 'Recipient' : 'Ship to'),
+            _AddressFields(
+              prefix: _gift ? 'Recipient' : 'Ship to',
+              address: widget.shippingAddress,
+              onChanged: widget.onShippingAddressChanged,
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -399,7 +409,11 @@ class _CheckoutAddressFormsState extends State<_CheckoutAddressForms> {
               title: const Text('Billing address is the same as shipping'),
             ),
             if (!_billingSameAsShipping)
-              const _AddressFields(prefix: 'Bill to'),
+              _AddressFields(
+                prefix: 'Bill to',
+                address: ShippingAddress(),
+                onChanged: (_) {},
+              ),
           ],
         ),
       ],
@@ -408,56 +422,208 @@ class _CheckoutAddressFormsState extends State<_CheckoutAddressForms> {
 }
 
 class _AddressFields extends StatelessWidget {
-  const _AddressFields({required this.prefix});
+  const _AddressFields({
+    required this.prefix,
+    required this.address,
+    required this.onChanged,
+  });
 
   final String prefix;
+  final ShippingAddress address;
+  final ValueChanged<ShippingAddress> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    InputDecoration decoration(String label) {
+      return InputDecoration(labelText: label);
+    }
+
+    void updateAddress({
+      String? firstName,
+      String? lastName,
+      String? addressLine1,
+      String? addressLine2,
+      String? city,
+      String? state,
+      String? postalCode,
+    }) {
+      onChanged(
+        ShippingAddress(
+          firstName: firstName ?? address.firstName,
+          lastName: lastName ?? address.lastName,
+          addressLine1: addressLine1 ?? address.addressLine1,
+          addressLine2: addressLine2 ?? address.addressLine2,
+          city: city ?? address.city,
+          state: state ?? address.state,
+          postalCode: postalCode ?? address.postalCode,
+          country: address.country,
+          phone: address.phone,
+          email: address.email,
+        ),
+      );
+    }
+
     return Column(
       children: [
         Row(
           children: [
             Expanded(
               child: TextField(
-                decoration: InputDecoration(labelText: '$prefix first name'),
+                decoration: decoration('$prefix first name'),
+                controller: TextEditingController(text: address.firstName)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.firstName.length,
+                  ),
+                onChanged: (value) => updateAddress(firstName: value),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
-                decoration: InputDecoration(labelText: '$prefix last name'),
+                decoration: decoration('$prefix last name'),
+                controller: TextEditingController(text: address.lastName)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.lastName.length,
+                  ),
+                onChanged: (value) => updateAddress(lastName: value),
               ),
             ),
           ],
         ),
         const SizedBox(height: 10),
         TextField(
-          decoration: InputDecoration(labelText: '$prefix address line 1'),
+          decoration: decoration('$prefix address line 1'),
+          controller: TextEditingController(text: address.addressLine1)
+            ..selection = TextSelection.collapsed(
+              offset: address.addressLine1.length,
+            ),
+          onChanged: (value) => updateAddress(addressLine1: value),
         ),
         const SizedBox(height: 10),
         TextField(
           decoration: const InputDecoration(
             labelText: 'Apartment, suite, etc.',
           ),
+          controller: TextEditingController(text: address.addressLine2)
+            ..selection = TextSelection.collapsed(
+              offset: address.addressLine2.length,
+            ),
+          onChanged: (value) => updateAddress(addressLine2: value),
         ),
         const SizedBox(height: 10),
-        TextField(decoration: const InputDecoration(labelText: 'County')),
-        const SizedBox(height: 10),
         Row(
-          children: const [
+          children: [
             Expanded(
-              child: TextField(decoration: InputDecoration(labelText: 'City')),
+              child: TextField(
+                decoration: decoration('City'),
+                controller: TextEditingController(text: address.city)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.city.length,
+                  ),
+                onChanged: (value) => updateAddress(city: value),
+              ),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Expanded(
-              child: TextField(decoration: InputDecoration(labelText: 'State')),
+              child: TextField(
+                decoration: decoration('State'),
+                controller: TextEditingController(text: address.state)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.state.length,
+                  ),
+                onChanged: (value) => updateAddress(state: value),
+              ),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Expanded(
-              child: TextField(decoration: InputDecoration(labelText: 'ZIP')),
+              child: TextField(
+                decoration: decoration('ZIP'),
+                keyboardType: TextInputType.number,
+                controller: TextEditingController(text: address.postalCode)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.postalCode.length,
+                  ),
+                onChanged: (value) => updateAddress(postalCode: value),
+              ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+class _CheckoutContactSection extends StatefulWidget {
+  const _CheckoutContactSection({
+    required this.email,
+    required this.phone,
+    required this.onEmailChanged,
+    required this.onPhoneChanged,
+  });
+
+  final String email;
+  final String phone;
+  final ValueChanged<String> onEmailChanged;
+  final ValueChanged<String> onPhoneChanged;
+
+  @override
+  State<_CheckoutContactSection> createState() =>
+      _CheckoutContactSectionState();
+}
+
+class _CheckoutContactSectionState extends State<_CheckoutContactSection> {
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.email);
+    _phoneController = TextEditingController(text: widget.phone);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CheckoutContactSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.email != _emailController.text) {
+      _emailController.text = widget.email;
+    }
+    if (widget.phone != _phoneController.text) {
+      _phoneController.text = widget.phone;
+    }
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _CheckoutSection(
+      title: 'Contact',
+      icon: Icons.email_outlined,
+      children: [
+        TextField(
+          controller: _emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email address',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+          keyboardType: TextInputType.emailAddress,
+          onChanged: widget.onEmailChanged,
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _phoneController,
+          decoration: const InputDecoration(
+            labelText: 'Phone number',
+            prefixIcon: Icon(Icons.phone_outlined),
+          ),
+          keyboardType: TextInputType.phone,
+          onChanged: widget.onPhoneChanged,
         ),
       ],
     );

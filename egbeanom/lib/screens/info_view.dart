@@ -31,19 +31,29 @@ class InfoView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final showBackToShop = switch (page) {
+      StoreInfoPage.notes ||
+      StoreInfoPage.ingredients ||
+      StoreInfoPage.brandProfile ||
+      StoreInfoPage.recommendations => false,
+      _ => true,
+    };
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: _StorefrontPage(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextButton.icon(
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to shop'),
-              style: TextButton.styleFrom(foregroundColor: Colors.white),
-            ),
-            const SizedBox(height: 10),
+            if (showBackToShop) ...[
+              TextButton.icon(
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Back to shop'),
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+              ),
+              const SizedBox(height: 10),
+            ],
             Text(
               _title,
               style: Theme.of(

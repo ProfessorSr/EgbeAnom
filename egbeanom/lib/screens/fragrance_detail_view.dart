@@ -126,7 +126,7 @@ class _FragranceDetailViewState extends State<FragranceDetailView> {
                             ),
                           ],
                           const SizedBox(height: 14),
-                          _DescriptionCard(product: item),
+                          _FragranceSectionsCard(product: item),
                           const SizedBox(height: 14),
                           _FragranceComments(
                             product: item,
@@ -265,8 +265,6 @@ class _FragranceDetailViewState extends State<FragranceDetailView> {
                             ],
                           ),
                           const SizedBox(height: 18),
-                          _ScentPyramidCard(product: item),
-                          const SizedBox(height: 12),
                           _CommerceInfoPanel(
                             shipping: _shippingStatement(
                               widget.shippingOptions,
@@ -408,30 +406,60 @@ class _ProductGalleryStrip extends StatelessWidget {
   }
 }
 
-class _DescriptionCard extends StatelessWidget {
-  const _DescriptionCard({required this.product});
+class _FragranceSectionsCard extends StatelessWidget {
+  const _FragranceSectionsCard({required this.product});
 
   final Fragrance product;
 
   @override
   Widget build(BuildContext context) {
+    final sections = [
+      ('Description', product.description),
+      ('Vibe', product.vibe),
+      ('Performance', product.performance),
+      ('Comparison', product.comparison),
+      ('Fragrance Profile', product.fragranceProfile),
+    ].where((section) => section.$2.trim().isNotEmpty).toList();
+    final noteSections = [
+      ('Top notes', product.topNotes),
+      ('Heart Notes', product.heartNotes),
+      ('Base Notes', product.baseNotes),
+    ].where((section) => section.$2.trim().isNotEmpty).toList();
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Description', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
-            Text(product.description),
+            for (var i = 0; i < sections.length; i++) ...[
+              if (i > 0) const SizedBox(height: 16),
+              Text(
+                sections[i].$1,
+                style: i == 0
+                    ? Theme.of(context).textTheme.titleLarge
+                    : Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(sections[i].$2),
+            ],
             if (product.ingredients.trim().isNotEmpty) ...[
-              const SizedBox(height: 16),
+              if (sections.isNotEmpty) const SizedBox(height: 16),
               Text(
                 'Notes and ingredients',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               Text(product.ingredients),
+            ],
+            for (final section in noteSections) ...[
+              if (sections.isNotEmpty ||
+                  product.ingredients.trim().isNotEmpty ||
+                  section != noteSections.first)
+                const SizedBox(height: 16),
+              Text(section.$1, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              _NoteChips(notes: section.$2),
             ],
           ],
         ),
@@ -440,30 +468,29 @@ class _DescriptionCard extends StatelessWidget {
   }
 }
 
-class _ScentPyramidCard extends StatelessWidget {
-  const _ScentPyramidCard({required this.product});
+class _NoteChips extends StatelessWidget {
+  const _NoteChips({required this.notes});
 
-  final Fragrance product;
+  final String notes;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Scent pyramid',
-              style: Theme.of(context).textTheme.titleLarge,
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final note
+            in notes
+                .split(',')
+                .map((item) => item.trim())
+                .where((item) => item.isNotEmpty))
+          Chip(
+            label: Text(note),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
             ),
-            const SizedBox(height: 12),
-            _NoteTier(label: 'Top notes', notes: product.topNotes),
-            _NoteTier(label: 'Heart notes', notes: product.heartNotes),
-            _NoteTier(label: 'Base notes', notes: product.baseNotes),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 }
@@ -558,51 +585,6 @@ class _VariantSelector extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _NoteTier extends StatelessWidget {
-  const _NoteTier({required this.label, required this.notes});
-
-  final String label;
-  final String notes;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 105,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-          Expanded(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final note
-                    in notes
-                        .split(',')
-                        .map((item) => item.trim())
-                        .where((item) => item.isNotEmpty))
-                  Chip(
-                    label: Text(note),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

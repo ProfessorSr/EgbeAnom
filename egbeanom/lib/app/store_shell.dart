@@ -20,7 +20,7 @@ class _StoreShellState extends State<StoreShell> {
   Fragrance? _selectedProduct;
   final List<CartLine> _cart = [];
   final List<Category> _categories = [];
-  final List<BrandProfile> _brands = List.of(buildSeedBrands());
+  final List<BrandProfile> _brands = [];
   CustomerAccount? _currentCustomer;
   BackendUser? _currentBackendUser;
   String _adminLoginError = '';
@@ -37,123 +37,43 @@ class _StoreShellState extends State<StoreShell> {
 
   final List<CouponRule> _coupons = [];
 
-  final List<PaymentMethodConfig> _paymentMethods = [
-    PaymentMethodConfig(
-      name: 'Stripe',
-      provider: 'Stripe',
-      status: 'Test mode',
-      fee: '2.9% + 30c',
-      settlement: '2 business days',
-    ),
-    PaymentMethodConfig(
-      name: 'Apple Pay',
-      provider: 'Apple Pay',
-      status: 'Not connected',
-      fee: 'Processor rate',
-      settlement: 'Card processor',
-      isEnabled: false,
-    ),
-    PaymentMethodConfig(
-      name: 'Google Pay',
-      provider: 'Google Pay',
-      status: 'Not connected',
-      fee: 'Processor rate',
-      settlement: 'Card processor',
-      isEnabled: false,
-    ),
-    PaymentMethodConfig(
-      name: 'Square',
-      provider: 'Square',
-      status: 'Not connected',
-      fee: 'Provider rate',
-      settlement: '1-2 business days',
-    ),
-    PaymentMethodConfig(
-      name: 'PayPal',
-      provider: 'PayPal',
-      status: 'Test mode',
-      fee: 'Provider rate',
-      settlement: 'PayPal balance',
-    ),
-  ];
-  final List<ShippingOption> _shippingOptions = List.of(
-    buildSeedShippingOptions(),
-  );
-  final List<TaxRule> _taxRules = [
-    TaxRule(
-      id: 'tax-default-az',
-      name: 'Arizona estimated sales tax',
-      state: 'AZ',
-      rate: 0.082,
-      sortOrder: 10,
-    ),
-  ];
-  StoreInfo _storeInfo = StoreInfo(email: 'orders@egbeanom.com', phone: '');
-  String _selectedShippingOptionId = 'ship-usps-ground';
+  final List<PaymentMethodConfig> _paymentMethods = [];
+  final List<ShippingOption> _shippingOptions = [];
+  final List<TaxRule> _taxRules = [];
+  StoreInfo _storeInfo = StoreInfo();
+  String _selectedShippingOptionId = '';
+  String _checkoutEmail = '';
+  String _checkoutPhone = '';
+  ShippingAddress _checkoutShippingAddress = ShippingAddress();
 
   final List<ContentBlock> _contentBlocks = [];
 
-  final List<NewsItem> _newsItems = List.of(buildSeedNewsItems());
-  final List<FragranceNoteGuide> _noteGuide = List.of(buildSeedNoteGuide());
-  final List<IngredientGuide> _ingredientGuide = List.of(
-    buildSeedIngredientGuide(),
-  );
-  final List<String> _familyOptions = [
-    'Amber',
-    'Aromatic',
-    'Chypre',
-    'Citrus',
-    'Earthy wood',
-    'Floral',
-    'Gourmand',
-    'Green fruity',
-    'Resinous wood',
-    'Soft / skin',
-    'Spice',
-    'White floral',
-    'Woody',
-  ];
-  final List<String> _seasonOptions = [
-    'Year-round',
-    'Warm weather',
-    'Cool weather',
-    'Spring',
-    'Summer',
-    'Fall',
-    'Winter',
-  ];
-  final List<String> _occasionOptions = [
-    'Daily wear',
-    'Office',
-    'Evening',
-    'Date night',
-    'Formal',
-    'Gifts',
-    'Vacation',
-    'Layering',
-  ];
+  final List<NewsItem> _newsItems = [];
+  final List<FragranceNoteGuide> _noteGuide = [];
+  final List<IngredientGuide> _ingredientGuide = [];
+  final List<String> _familyOptions = [];
+  final List<String> _seasonOptions = [];
+  final List<String> _occasionOptions = [];
 
-  final List<ReviewSummary> _productReviews = List.of(
-    buildSeedProductReviews(),
-  );
+  final List<ReviewSummary> _productReviews = [];
 
   final List<ReviewSummary> _companyReviews = [];
   final SiteStatus _siteStatus = SiteStatus();
   final EmailServerSettings _emailSettings = EmailServerSettings();
-  final List<BackendUser> _backendUsers = [
-    BackendUser(
-      id: 'ADM-1001',
-      name: 'Store owner',
-      email: 'owner@egbeanom.com',
-      role: 'owner',
-    ),
-  ];
+  final Map<String, ShippingCarrierCredentials> _shippingCredentials = {
+    'USPS': const ShippingCarrierCredentials(),
+    'UPS': const ShippingCarrierCredentials(),
+    'FedEx': const ShippingCarrierCredentials(),
+    'DHL': const ShippingCarrierCredentials(),
+  };
+  final List<BackendUser> _backendUsers = [];
   final List<StoreNotification> _notifications = [];
   bool _adminPreviewMode = false;
+  bool _refreshingShippingRate = false;
 
   List<ActiveCart> get _marketplaceCarts => [];
 
-  final List<CustomerAccount> _customers = List.of(buildSeedCustomers());
+  final List<CustomerAccount> _customers = [];
 
   final List<DailyMetric> _dailyMetrics = [];
 
@@ -296,7 +216,13 @@ class _StoreShellState extends State<StoreShell> {
     Future<T> fallback<T>(Future<T> Function() load, T value) async {
       try {
         return await load();
-      } catch (_) {
+      } catch (error, stackTrace) {
+        // Track error but allow graceful fallback
+        ErrorTracker().captureException(
+          error,
+          stackTrace: stackTrace,
+          contexts: {'operation': 'store_data_load', 'data_type': T.toString()},
+        );
         return value;
       }
     }
@@ -379,6 +305,17 @@ class _StoreShellState extends State<StoreShell> {
       _gateway.fetchEmailServerSettings,
       null,
     );
+    final shippingCredentials = await fallback<Map<String, dynamic>?>(
+      _gateway.fetchShippingCarrierCredentials,
+      null,
+    );
+    final carrierCredentialRows = <String, Map<String, dynamic>?>{};
+    for (final carrier in _shippingCredentials.keys) {
+      carrierCredentialRows[carrier] = await fallback<Map<String, dynamic>?>(
+        () => _gateway.fetchShippingCarrierCredentialsForCarrier(carrier),
+        null,
+      );
+    }
     final storeInfo = await fallback<Map<String, dynamic>?>(
       _gateway.fetchStoreInfo,
       null,
@@ -400,7 +337,6 @@ class _StoreShellState extends State<StoreShell> {
       return;
     }
 
-    final defaultPaymentMethods = List<PaymentMethodConfig>.of(_paymentMethods);
     const allowedPaymentProviders = {
       'stripe',
       'apple pay',
@@ -428,15 +364,6 @@ class _StoreShellState extends State<StoreShell> {
                   ),
                 ),
           );
-        for (final method in defaultPaymentMethods) {
-          final exists = _paymentMethods.any(
-            (item) =>
-                item.provider.toLowerCase() == method.provider.toLowerCase(),
-          );
-          if (!exists) {
-            _paymentMethods.add(method);
-          }
-        }
       }
       if (shippingOptions.isNotEmpty) {
         _shippingOptions
@@ -528,6 +455,22 @@ class _StoreShellState extends State<StoreShell> {
           ..username = settings.username
           ..useSsl = settings.useSsl;
       }
+      final legacyValue =
+          shippingCredentials != null && shippingCredentials['value'] is Map
+          ? (shippingCredentials['value'] as Map).cast<Object?, Object?>()
+          : const <Object?, Object?>{};
+      for (final carrier in _shippingCredentials.keys) {
+        final providerSetting = carrierCredentialRows[carrier];
+        if (providerSetting != null && providerSetting['value'] is Map) {
+          _shippingCredentials[carrier] = ShippingCarrierCredentials.fromJson(
+            providerSetting['value'],
+          );
+          continue;
+        }
+        _shippingCredentials[carrier] = ShippingCarrierCredentials.fromJson(
+          legacyValue[carrier],
+        );
+      }
       if (storeInfo != null) {
         _storeInfo = StoreInfo.fromRow(storeInfo);
       }
@@ -543,7 +486,6 @@ class _StoreShellState extends State<StoreShell> {
           ..clear()
           ..addAll(backendUsers.map(BackendUser.fromRow));
       }
-      _hydrateOrderLines();
     });
     unawaited(_loadFragranceNews());
   }
@@ -589,26 +531,6 @@ class _StoreShellState extends State<StoreShell> {
       ..addAll(names);
   }
 
-  void _hydrateOrderLines() {
-    if (_products.length < 4) {
-      return;
-    }
-    for (final order in _orders) {
-      if (order.lines.isNotEmpty) {
-        continue;
-      }
-      if (order.customer.contains('Jasmine')) {
-        order.lines.add(CartLine(product: _products[0], quantity: 1));
-        order.lines.add(CartLine(product: _products[3], quantity: 1));
-      } else if (order.customer.contains('Marcus')) {
-        order.lines.add(CartLine(product: _products[10], quantity: 1));
-      } else if (order.customer.contains('Leah')) {
-        order.lines.add(CartLine(product: _products[4], quantity: 1));
-        order.lines.add(CartLine(product: _products[11], quantity: 1));
-      }
-    }
-  }
-
   List<Fragrance> get _visibleProducts {
     var active = _products.where((product) => product.isActive).toList();
     if (_filter != 'All') {
@@ -624,13 +546,7 @@ class _StoreShellState extends State<StoreShell> {
     if (_query.trim().isNotEmpty) {
       final query = _query.toLowerCase();
       active = active
-          .where(
-            (product) =>
-                product.name.toLowerCase().contains(query) ||
-                product.notes.toLowerCase().contains(query) ||
-                product.brand.toLowerCase().contains(query) ||
-                product.vendor.toLowerCase().contains(query),
-          )
+          .where((product) => _productSearchText(product).contains(query))
           .toList();
     }
     active.sort((a, b) {
@@ -642,6 +558,32 @@ class _StoreShellState extends State<StoreShell> {
       };
     });
     return active;
+  }
+
+  String _productSearchText(Fragrance product) {
+    return [
+      product.name,
+      product.type,
+      product.brand,
+      product.vendor,
+      product.sku,
+      product.description,
+      product.vibe,
+      product.performance,
+      product.comparison,
+      product.fragranceProfile,
+      product.ingredients,
+      product.notes,
+      product.topNotes,
+      product.heartNotes,
+      product.baseNotes,
+      product.concentration,
+      product.gender,
+      product.season,
+      product.occasion,
+      product.family,
+      product.itemLocation,
+    ].join(' ').toLowerCase();
   }
 
   List<Fragrance> get _homeProducts {
@@ -677,6 +619,15 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   String get _homeShelfTitle => _siteStatus.homeShelfMode;
+
+  void _showStatusSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   void _openCatalog({String? query, String? filter}) {
     setState(() {
@@ -728,14 +679,7 @@ class _StoreShellState extends State<StoreShell> {
   ShippingOption get _selectedShippingOption {
     final options = _enabledShippingOptions;
     if (options.isEmpty) {
-      return ShippingOption(
-        id: 'fallback-standard',
-        name: 'Standard shipping',
-        carrier: 'USPS',
-        service: 'Ground Advantage',
-        priority: 'Standard',
-        price: 7.95,
-      );
+      throw StateError('No enabled shipping options are configured.');
     }
     return options.firstWhere(
       (option) => option.id == _selectedShippingOptionId,
@@ -745,7 +689,7 @@ class _StoreShellState extends State<StoreShell> {
 
   double get _shipping => _cartSubtotal > 125 || _cartSubtotal == 0
       ? 0
-      : _selectedShippingOption.price;
+      : (_enabledShippingOptions.isEmpty ? 0 : _selectedShippingOption.price);
   double get _cartTotal => _cartSubtotal + _tax + _shipping;
 
   void _recordDailyEvent({
@@ -925,16 +869,95 @@ class _StoreShellState extends State<StoreShell> {
 
   int _recommendationScore(Fragrance product, Set<String> likedTerms) {
     final haystack =
-        '${product.type} ${product.family} ${product.season} ${product.occasion} ${product.topNotes} ${product.heartNotes} ${product.baseNotes} ${product.notes}'
+        '${product.type} ${product.family} ${product.season} ${product.occasion} ${product.description} ${product.vibe} ${product.performance} ${product.comparison} ${product.fragranceProfile} ${product.topNotes} ${product.heartNotes} ${product.baseNotes} ${product.notes}'
             .toLowerCase();
     return likedTerms.where(haystack.contains).length * 10 + product.sold;
   }
 
   void _openCheckout() {
-    if (_cart.isEmpty) {
+    if (_cart.isEmpty || _enabledShippingOptions.isEmpty) {
+      if (_enabledShippingOptions.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Shipping options are not configured yet.'),
+          ),
+        );
+      }
       return;
     }
+    _hydrateCheckoutFields();
     setState(() => _view = StoreView.checkout);
+    unawaited(_refreshSelectedShippingRate());
+  }
+
+  void _hydrateCheckoutFields() {
+    final customer = _currentCustomer;
+    if (customer == null) {
+      return;
+    }
+    _checkoutEmail = customer.email;
+    _checkoutShippingAddress = ShippingAddress(
+      firstName: customer.name.split(' ').first,
+      lastName: customer.name.split(' ').skip(1).join(' '),
+      addressLine1: customer.addressLine1,
+      addressLine2: customer.addressLine2,
+      city: customer.city,
+      state: customer.state,
+      postalCode: customer.postalCode,
+      country: customer.country,
+      phone: _checkoutPhone,
+      email: customer.email,
+    );
+  }
+
+  Future<void> _refreshSelectedShippingRate() async {
+    final customer = _currentCustomer;
+    final option = _selectedShippingOption;
+    final destinationZip = customer?.postalCode.trim().isNotEmpty == true
+        ? customer!.postalCode.trim()
+        : _checkoutShippingAddress.postalCode.trim();
+    if (_refreshingShippingRate ||
+        option.carrier.trim().toUpperCase() != 'USPS' ||
+        destinationZip.isEmpty ||
+        _storeInfo.postalCode.trim().isEmpty ||
+        !(_shippingCredentials['USPS']?.isConfigured ?? false)) {
+      return;
+    }
+    _refreshingShippingRate = true;
+    try {
+      final package = _packageMetricsForLines(_cart);
+      final quotes = await _gateway.quoteShippingRates(
+        ShippingRateRequest(
+          carrier: 'USPS',
+          service: option.service,
+          originZip: _storeInfo.postalCode,
+          destinationZip: destinationZip,
+          weightOz: package['weightOz'] as double,
+          lengthIn: package['lengthIn'] as double,
+          widthIn: package['widthIn'] as double,
+          heightIn: package['heightIn'] as double,
+        ),
+      );
+      if (!mounted || quotes.isEmpty) {
+        return;
+      }
+      final quote = quotes.firstWhere(
+        (item) =>
+            item.service.trim().toUpperCase() ==
+            option.service.trim().toUpperCase(),
+        orElse: () => quotes.first,
+      );
+      setState(() {
+        option.price = quote.amount;
+        if (quote.estimatedDays.trim().isNotEmpty) {
+          option.estimatedDays = quote.estimatedDays;
+        }
+      });
+    } catch (_) {
+      // Preserve the last configured storefront rate when USPS quoting fails.
+    } finally {
+      _refreshingShippingRate = false;
+    }
   }
 
   void _changeQuantity(CartLine line, int delta) {
@@ -954,8 +977,19 @@ class _StoreShellState extends State<StoreShell> {
     }
 
     final customer = _currentCustomer;
-    final customerName = customer?.name ?? 'Online customer';
-    final email = customer?.email ?? 'guest@example.com';
+    final guestName =
+        '${_checkoutShippingAddress.firstName} ${_checkoutShippingAddress.lastName}'
+            .trim();
+    if (guestName.isEmpty || _checkoutEmail.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a shipping name and email before checkout.'),
+        ),
+      );
+      return;
+    }
+    final customerName = customer?.name ?? guestName;
+    final email = customer?.email ?? _checkoutEmail.trim();
     final orderId = 'EA-${1049 + _orders.length}';
     final shippingOption = _selectedShippingOption;
     late final Order order;
@@ -997,6 +1031,31 @@ class _StoreShellState extends State<StoreShell> {
         shippingService: shippingOption.service,
         shippingPriority: shippingOption.priority,
         shippingTotal: _shipping,
+        shippingAddress: customer == null
+            ? ShippingAddress(
+                firstName: _checkoutShippingAddress.firstName,
+                lastName: _checkoutShippingAddress.lastName,
+                addressLine1: _checkoutShippingAddress.addressLine1,
+                addressLine2: _checkoutShippingAddress.addressLine2,
+                city: _checkoutShippingAddress.city,
+                state: _checkoutShippingAddress.state,
+                postalCode: _checkoutShippingAddress.postalCode,
+                country: _checkoutShippingAddress.country,
+                phone: _checkoutPhone,
+                email: email,
+              )
+            : ShippingAddress(
+                firstName: customerName.split(' ').first,
+                lastName: customerName.split(' ').skip(1).join(' '),
+                addressLine1: customer.addressLine1,
+                addressLine2: customer.addressLine2,
+                city: customer.city,
+                state: customer.state,
+                postalCode: customer.postalCode,
+                country: customer.country,
+                phone: _checkoutPhone,
+                email: email,
+              ),
         createdAt: DateTime.now(),
         lines: lines,
       );
@@ -1411,7 +1470,7 @@ class _StoreShellState extends State<StoreShell> {
       'id': product.id,
       'category_id': product.categoryId,
       'brand_id': product.brandId,
-      'name': product.name.isEmpty ? 'Untitled fragrance' : product.name,
+      'name': product.name,
       'fragrance_type': product.type,
       'brand': product.brand,
       'vendor': product.vendor,
@@ -1429,6 +1488,10 @@ class _StoreShellState extends State<StoreShell> {
           '#${product.featuredColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
       'is_active': product.isActive,
       'description': product.description,
+      'vibe': product.vibe,
+      'performance': product.performance,
+      'comparison': product.comparison,
+      'fragrance_profile': product.fragranceProfile,
       'ingredients': product.ingredients,
       'top_notes': product.topNotes,
       'heart_notes': product.heartNotes,
@@ -1459,14 +1522,19 @@ class _StoreShellState extends State<StoreShell> {
     };
   }
 
-  void _updateOrder(Order order) {
+  Future<void> _updateOrder(Order order) async {
     setState(() {
       final index = _orders.indexWhere((item) => item.id == order.id);
       if (index != -1) {
         _orders[index] = order;
       }
     });
-    _gateway.upsertOrder(_orderRow(order));
+    try {
+      await _gateway.upsertOrder(_orderRow(order));
+      _showStatusSnack('Order saved.');
+    } catch (error) {
+      _showStatusSnack('Order save failed: $error');
+    }
   }
 
   void _updateOrdersWithEmail(
@@ -1474,6 +1542,7 @@ class _StoreShellState extends State<StoreShell> {
     String fulfillmentStatus,
     String labelStatus,
   ) {
+    final saves = <Future<void>>[];
     setState(() {
       for (final order in orders) {
         order
@@ -1495,9 +1564,21 @@ class _StoreShellState extends State<StoreShell> {
             createdAt: DateTime.now(),
           ),
         );
-        _gateway.upsertOrder(_orderRow(order));
+        saves.add(_gateway.upsertOrder(_orderRow(order)));
       }
     });
+    unawaited(
+      Future.wait(saves)
+          .then(
+            (_) => _showStatusSnack(
+              '${orders.length} order status update(s) saved.',
+            ),
+          )
+          .catchError(
+            (Object error) =>
+                _showStatusSnack('Order status update failed: $error'),
+          ),
+    );
   }
 
   Map<String, dynamic> _orderRow(Order order) {
@@ -1516,7 +1597,79 @@ class _StoreShellState extends State<StoreShell> {
       'shipping_priority': order.shippingPriority,
       'tracking_number': order.trackingNumber,
       'label_status': order.labelStatus,
+      'shipping_address': order.shippingAddress.toJson(),
     };
+  }
+
+  Map<String, dynamic> _packageRowForOrder(Order order) {
+    return _packageMetricsForLines(order.lines);
+  }
+
+  Map<String, dynamic> _packageMetricsForLines(List<CartLine> lines) {
+    if (lines.isEmpty) {
+      return {
+        'weightOz': 8.0,
+        'lengthIn': 6.0,
+        'widthIn': 3.0,
+        'heightIn': 3.0,
+      };
+    }
+    var weightOz = 0.0;
+    var maxLength = 0.0;
+    var maxWidth = 0.0;
+    var totalHeight = 0.0;
+    for (final line in lines) {
+      final quantity = line.quantity;
+      weightOz += line.product.weightOz * quantity;
+      maxLength = math.max(maxLength, line.product.lengthIn);
+      maxWidth = math.max(maxWidth, line.product.widthIn);
+      totalHeight += math.max(0.5, line.product.heightIn) * quantity;
+    }
+    return {
+      'weightOz': weightOz <= 0 ? 8.0 : weightOz,
+      'lengthIn': maxLength <= 0 ? 6.0 : maxLength,
+      'widthIn': maxWidth <= 0 ? 3.0 : maxWidth,
+      'heightIn': totalHeight <= 0 ? 3.0 : totalHeight,
+    };
+  }
+
+  Future<ShippingLabelResult> _createShippingLabel(Order order) async {
+    final result = await _gateway.createUspsLabel(
+      order: _orderRow(order),
+      storeInfo: _storeInfo.toRow(),
+      package: _packageRowForOrder(order),
+    );
+    downloadBase64File(
+      fileName: result.labelFileName,
+      base64Contents: result.labelBase64,
+      mimeType: result.labelContentType,
+    );
+    setState(() {
+      order
+        ..trackingNumber = result.trackingNumber
+        ..labelStatus = result.labelStatus
+        ..fulfillmentStatus = 'Label created'
+        ..status = 'Label created'
+        ..shippingCarrier = 'USPS';
+      if (result.postage > 0) {
+        order.shippingTotal = result.postage;
+      }
+      if (result.estimatedDays.trim().isNotEmpty) {
+        _notifications.insert(
+          0,
+          StoreNotification(
+            id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-label',
+            type: 'shipping',
+            title: 'USPS label created',
+            message:
+                '${order.id} label created for ${result.trackingNumber} (${result.estimatedDays}).',
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    });
+    await _gateway.upsertOrder(_orderRow(order));
+    return result;
   }
 
   Map<String, dynamic> _reviewRow(ReviewSummary review) {
@@ -1536,7 +1689,6 @@ class _StoreShellState extends State<StoreShell> {
   Map<String, dynamic> _couponRow(CouponRule coupon) {
     final code = coupon.code.trim().toUpperCase();
     return {
-      'id': code,
       'code': code,
       'name': coupon.name,
       'discount_type': coupon.type,
@@ -1562,6 +1714,7 @@ class _StoreShellState extends State<StoreShell> {
       'mode': method.mode,
       'public_key': method.publicKey,
       'merchant_id': method.merchantId,
+      'api_secret': method.apiSecret,
       'webhook_url': method.webhookUrl,
       'statement_descriptor': method.statementDescriptor,
     };
@@ -1569,6 +1722,7 @@ class _StoreShellState extends State<StoreShell> {
 
   Future<void> _updateReview(ReviewSummary review, String status) async {
     final previousStatus = review.status;
+    final isDeleteAction = status == 'rejected';
     setState(() {
       review.status = status;
       _notifications.insert(
@@ -1584,6 +1738,16 @@ class _StoreShellState extends State<StoreShell> {
     });
     try {
       await _gateway.updateReviewStatus('${review.id}', status);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isDeleteAction ? 'Review deleted.' : 'Review approved.',
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -1601,6 +1765,9 @@ class _StoreShellState extends State<StoreShell> {
           ),
         );
       });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Review update failed: $error')));
     }
   }
 
@@ -1619,7 +1786,7 @@ class _StoreShellState extends State<StoreShell> {
     });
   }
 
-  void _updateEmailSettings(EmailServerSettings settings) {
+  Future<void> _updateEmailSettings(EmailServerSettings settings) async {
     setState(() {
       _emailSettings
         ..fromName = settings.fromName
@@ -1631,10 +1798,49 @@ class _StoreShellState extends State<StoreShell> {
         ..username = settings.username
         ..useSsl = settings.useSsl;
     });
-    _gateway.upsertEmailServerSettings(_emailSettings.toJson());
+    try {
+      await _gateway.upsertEmailServerSettings(_emailSettings.toJson());
+      _showStatusSnack('Email settings saved.');
+    } catch (error) {
+      _showStatusSnack('Email settings save failed: $error');
+    }
   }
 
-  void _updateSiteStatus(SiteStatus status) {
+  Future<void> _saveShippingCredentials(
+    String carrier,
+    ShippingCarrierCredentials credentials,
+  ) async {
+    setState(() {
+      _shippingCredentials[carrier] = credentials;
+    });
+    try {
+      await _gateway.upsertShippingCarrierCredentialsForCarrier(
+        carrier,
+        credentials.toJson(),
+      );
+      _showStatusSnack('$carrier credentials saved.');
+    } catch (error) {
+      _showStatusSnack('$carrier credentials save failed: $error');
+    }
+  }
+
+  Future<void> _updateSiteStatus(SiteStatus status) async {
+    final previous = SiteStatus(
+      isLive: _siteStatus.isLive,
+      measurementSystem: _siteStatus.measurementSystem,
+      message: _siteStatus.message,
+      showNoteEncyclopedia: _siteStatus.showNoteEncyclopedia,
+      showIngredientProfiles: _siteStatus.showIngredientProfiles,
+      showBrandProfile: _siteStatus.showBrandProfile,
+      showRecommendations: _siteStatus.showRecommendations,
+      showLatestFragranceNews: _siteStatus.showLatestFragranceNews,
+      showCommunity: _siteStatus.showCommunity,
+      showCompanyReviews: _siteStatus.showCompanyReviews,
+      homeShelfMode: _siteStatus.homeShelfMode,
+      featuredProductIds: List.of(_siteStatus.featuredProductIds),
+      returnPolicy: _siteStatus.returnPolicy,
+      googleAnalyticsMeasurementId: _siteStatus.googleAnalyticsMeasurementId,
+    );
     setState(() {
       _siteStatus
         ..isLive = status.isLive
@@ -1652,11 +1858,35 @@ class _StoreShellState extends State<StoreShell> {
         ..returnPolicy = status.returnPolicy
         ..googleAnalyticsMeasurementId = status.googleAnalyticsMeasurementId;
     });
-    _gateway.upsertSiteStatus(_siteStatus.toJson());
-    configureGoogleAnalytics(_siteStatus.googleAnalyticsMeasurementId);
+    try {
+      await _gateway.upsertSiteStatus(_siteStatus.toJson());
+      configureGoogleAnalytics(_siteStatus.googleAnalyticsMeasurementId);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _siteStatus
+            ..isLive = previous.isLive
+            ..measurementSystem = previous.measurementSystem
+            ..message = previous.message
+            ..showNoteEncyclopedia = previous.showNoteEncyclopedia
+            ..showIngredientProfiles = previous.showIngredientProfiles
+            ..showBrandProfile = previous.showBrandProfile
+            ..showRecommendations = previous.showRecommendations
+            ..showLatestFragranceNews = previous.showLatestFragranceNews
+            ..showCommunity = previous.showCommunity
+            ..showCompanyReviews = previous.showCompanyReviews
+            ..homeShelfMode = previous.homeShelfMode
+            ..featuredProductIds = List.of(previous.featuredProductIds)
+            ..returnPolicy = previous.returnPolicy
+            ..googleAnalyticsMeasurementId =
+                previous.googleAnalyticsMeasurementId;
+        });
+      }
+      rethrow;
+    }
   }
 
-  void _upsertBackendUser(BackendUser user) {
+  Future<void> _upsertBackendUser(BackendUser user) async {
     setState(() {
       final index = _backendUsers.indexWhere((item) => item.id == user.id);
       if (index == -1) {
@@ -1665,20 +1895,25 @@ class _StoreShellState extends State<StoreShell> {
         _backendUsers[index] = user;
       }
     });
-    _gateway.upsertBackendUser({
-      'id': user.id,
-      'name': user.name,
-      'email': user.email,
-      'role': user.role,
-      'is_active': user.isActive,
-      'is_blocked': user.isBlocked,
-      'created_ip': user.createdIp,
-      'last_login_ip': user.lastLoginIp,
-      'blocked_reason': user.blockedReason,
-    });
+    try {
+      await _gateway.upsertBackendUser({
+        'id': user.id,
+        'name': user.name,
+        'email': user.email,
+        'role': user.role,
+        'is_active': user.isActive,
+        'is_blocked': user.isBlocked,
+        'created_ip': user.createdIp,
+        'last_login_ip': user.lastLoginIp,
+        'blocked_reason': user.blockedReason,
+      });
+      _showStatusSnack('Backend user saved.');
+    } catch (error) {
+      _showStatusSnack('Backend user save failed: $error');
+    }
   }
 
-  void _upsertCustomer(CustomerAccount customer) {
+  Future<void> _upsertCustomer(CustomerAccount customer) async {
     setState(() {
       final index = _customers.indexWhere((item) => item.id == customer.id);
       if (index == -1) {
@@ -1687,22 +1922,29 @@ class _StoreShellState extends State<StoreShell> {
         _customers[index] = customer;
       }
     });
-    _gateway.upsertCustomer(customer.toRow());
+    try {
+      await _gateway.upsertCustomer(customer.toRow());
+      _showStatusSnack('Customer saved.');
+    } catch (error) {
+      _showStatusSnack('Customer save failed: $error');
+    }
   }
 
-  void _blockIpAddress(String ipAddress) {
+  Future<void> _blockIpAddress(String ipAddress) async {
     final clean = ipAddress.trim();
     if (clean.isEmpty) {
       return;
     }
-    _gateway.upsertBlockedIp({
-      'ip_address': clean,
-      'reason': 'Blocked from admin account tools',
-      'is_active': true,
-    });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Blocked IP address $clean')));
+    try {
+      await _gateway.upsertBlockedIp({
+        'ip_address': clean,
+        'reason': 'Blocked from admin account tools',
+        'is_active': true,
+      });
+      _showStatusSnack('Blocked IP address $clean.');
+    } catch (error) {
+      _showStatusSnack('IP block save failed: $error');
+    }
   }
 
   Widget _storefrontGate(Widget child) {
@@ -1752,6 +1994,7 @@ class _StoreShellState extends State<StoreShell> {
     });
     try {
       await _gateway.deleteProduct(product.id);
+      _showStatusSnack('Fragrance deleted.');
     } catch (error) {
       if (!mounted) {
         return;
@@ -1763,7 +2006,7 @@ class _StoreShellState extends State<StoreShell> {
     }
   }
 
-  void _approveFragranceNote(String name) {
+  Future<void> _approveFragranceNote(String name) async {
     final clean = name.trim();
     if (clean.isEmpty) {
       return;
@@ -1781,13 +2024,18 @@ class _StoreShellState extends State<StoreShell> {
       );
       setState(() => _noteGuide.add(note));
     }
-    _gateway.upsertFragranceNote({
-      'id': DateTime.now().millisecondsSinceEpoch,
-      'name': clean,
-      'note_type': 'Custom',
-      'family': 'Pending family',
-      'description': 'Approved from a product-specific fragrance note.',
-    });
+    try {
+      await _gateway.upsertFragranceNote({
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'name': clean,
+        'note_type': 'Custom',
+        'family': 'Pending family',
+        'description': 'Approved from a product-specific fragrance note.',
+      });
+      _showStatusSnack('Fragrance note approved.');
+    } catch (error) {
+      _showStatusSnack('Fragrance note approval failed: $error');
+    }
   }
 
   Future<void> _upsertCategory(Category category) async {
@@ -1815,40 +2063,64 @@ class _StoreShellState extends State<StoreShell> {
     });
   }
 
-  void _removeCategory(Category category) {
+  Future<void> _removeCategory(Category category) async {
     setState(() {
       category.isVisible = false;
       if (_filter == category.name) {
         _filter = 'All';
       }
     });
-    _gateway.upsertCategory({
-      'id': category.id,
-      'name': category.name,
-      'description': category.description,
-      'sort_order': category.sortOrder,
-      'is_visible': category.isVisible,
-    });
+    try {
+      await _gateway.upsertCategory({
+        'id': category.id,
+        'name': category.name,
+        'description': category.description,
+        'sort_order': category.sortOrder,
+        'is_visible': category.isVisible,
+      });
+      _showStatusSnack('Category hidden.');
+    } catch (error) {
+      _showStatusSnack('Category update failed: $error');
+    }
   }
 
   Future<void> _upsertCoupon(CouponRule coupon) async {
-    await _gateway.upsertCouponRule(_couponRow(coupon));
+    final saved = await _gateway.upsertCouponRule(_couponRow(coupon));
+    if (saved == null) {
+      throw StateError('Promotion save did not return the saved database row.');
+    }
+    final savedCoupon = CouponRule.fromRow(saved);
+    if (savedCoupon.isActive != coupon.isActive ||
+        savedCoupon.isArchived != coupon.isArchived) {
+      throw StateError(
+        'Promotion save did not persist the requested active/archive status.',
+      );
+    }
     setState(() {
-      final index = _coupons.indexWhere((item) => item.code == coupon.code);
+      final index = _coupons.indexWhere(
+        (item) => item.code == savedCoupon.code,
+      );
       if (index == -1) {
-        _coupons.add(coupon);
+        _coupons.add(savedCoupon);
       } else {
-        _coupons[index] = coupon;
+        _coupons[index] = savedCoupon;
       }
     });
   }
 
-  void _togglePayment(PaymentMethodConfig method) {
+  Future<void> _togglePayment(PaymentMethodConfig method) async {
     setState(() => method.isEnabled = !method.isEnabled);
-    _gateway.upsertPaymentMethod(_paymentMethodRow(method));
+    try {
+      await _gateway.upsertPaymentMethod(_paymentMethodRow(method));
+      _showStatusSnack(
+        '${method.name} ${method.isEnabled ? 'enabled' : 'disabled'}.',
+      );
+    } catch (error) {
+      _showStatusSnack('Payment method update failed: $error');
+    }
   }
 
-  void _savePayment(PaymentMethodConfig method) {
+  Future<void> _savePayment(PaymentMethodConfig method) async {
     setState(() {
       final index = _paymentMethods.indexWhere(
         (item) => item.provider == method.provider && item.name == method.name,
@@ -1859,10 +2131,21 @@ class _StoreShellState extends State<StoreShell> {
         _paymentMethods[index] = method;
       }
     });
-    _gateway.upsertPaymentMethod(_paymentMethodRow(method));
+    try {
+      await _gateway.upsertPaymentMethod(_paymentMethodRow(method));
+      await _gateway.upsertPaymentProcessorCredentials(method.provider, {
+        'publicKey': method.publicKey,
+        'merchantId': method.merchantId,
+        'apiSecret': method.apiSecret,
+        'webhookUrl': method.webhookUrl,
+      });
+      _showStatusSnack('Payment method saved.');
+    } catch (error) {
+      _showStatusSnack('Payment method save failed: $error');
+    }
   }
 
-  void _saveShippingOption(ShippingOption option) {
+  Future<void> _saveShippingOption(ShippingOption option) async {
     setState(() {
       final index = _shippingOptions.indexWhere((item) => item.id == option.id);
       if (index == -1) {
@@ -1877,10 +2160,15 @@ class _StoreShellState extends State<StoreShell> {
         _selectedShippingOptionId = active.first.id;
       }
     });
-    _gateway.upsertShippingOption(option.toRow());
+    try {
+      await _gateway.upsertShippingOption(option.toRow());
+      _showStatusSnack('Shipping option saved.');
+    } catch (error) {
+      _showStatusSnack('Shipping option save failed: $error');
+    }
   }
 
-  void _deleteShippingOption(ShippingOption option) {
+  Future<void> _deleteShippingOption(ShippingOption option) async {
     setState(() {
       _shippingOptions.removeWhere((item) => item.id == option.id);
       final active = _enabledShippingOptions;
@@ -1888,12 +2176,17 @@ class _StoreShellState extends State<StoreShell> {
         _selectedShippingOptionId = active.first.id;
       }
     });
-    _gateway.deleteShippingOption(option.id);
+    try {
+      await _gateway.deleteShippingOption(option.id);
+      _showStatusSnack('Shipping option deleted.');
+    } catch (error) {
+      _showStatusSnack('Shipping option delete failed: $error');
+    }
   }
 
-  void _saveStoreInfo(StoreInfo info) {
+  Future<void> _saveStoreInfo(StoreInfo info) async {
     setState(() => _storeInfo = info);
-    _gateway.upsertStoreInfo(info.toRow());
+    await _gateway.upsertStoreInfo(info.toRow());
   }
 
   Future<String> _uploadStoreAsset(UploadedImageFile file) {
@@ -1904,7 +2197,7 @@ class _StoreShellState extends State<StoreShell> {
     );
   }
 
-  void _saveTaxRule(TaxRule rule) {
+  Future<void> _saveTaxRule(TaxRule rule) async {
     setState(() {
       final index = _taxRules.indexWhere((item) => item.id == rule.id);
       if (index == -1) {
@@ -1914,10 +2207,17 @@ class _StoreShellState extends State<StoreShell> {
       }
       _taxRules.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     });
-    _gateway.upsertTaxRule(rule.toRow());
+    await _gateway.upsertTaxRule(rule.toRow());
   }
 
-  void _upsertContent(ContentBlock block) {
+  Future<void> _deleteTaxRule(TaxRule rule) async {
+    setState(() {
+      _taxRules.removeWhere((item) => item.id == rule.id);
+    });
+    await _gateway.deleteTaxRule(rule.id);
+  }
+
+  Future<void> _upsertContent(ContentBlock block) async {
     setState(() {
       final index = _contentBlocks.indexWhere((item) => item.id == block.id);
       if (index == -1) {
@@ -1927,14 +2227,19 @@ class _StoreShellState extends State<StoreShell> {
       }
       _contentBlocks.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     });
-    _gateway.upsertContentBlock({
-      'id': block.id,
-      'title': block.title,
-      'placement': block.placement,
-      'body': block.body,
-      'sort_order': block.sortOrder,
-      'is_visible': block.isVisible,
-    });
+    try {
+      await _gateway.upsertContentBlock({
+        'id': block.id,
+        'title': block.title,
+        'placement': block.placement,
+        'body': block.body,
+        'sort_order': block.sortOrder,
+        'is_visible': block.isVisible,
+      });
+      _showStatusSnack('Content block saved.');
+    } catch (error) {
+      _showStatusSnack('Content block save failed: $error');
+    }
   }
 
   void _sendContactMessage(
@@ -1963,10 +2268,16 @@ class _StoreShellState extends State<StoreShell> {
         title: const SizedBox.shrink(),
         actions: [
           _NavButton(
+            label: 'Home',
+            icon: Icons.home_outlined,
+            selected: _view == StoreView.shop,
+            onPressed: () => setState(() => _view = StoreView.shop),
+          ),
+          _NavButton(
             label: 'Shop',
             icon: Icons.storefront,
-            selected: _view == StoreView.shop || _view == StoreView.detail,
-            onPressed: () => setState(() => _view = StoreView.shop),
+            selected: _view == StoreView.catalog || _view == StoreView.detail,
+            onPressed: () => _openCatalog(query: '', filter: 'All'),
           ),
           _NavButton(
             label: 'Cart',
@@ -2062,7 +2373,7 @@ class _StoreShellState extends State<StoreShell> {
       StoreView.detail => _storefrontGate(
         FragranceDetailView(
           product: _selectedProduct,
-          onBack: () => setState(() => _view = StoreView.shop),
+          onBack: () => _openCatalog(query: '', filter: 'All'),
           onAddToCart: _addToCart,
           onBuyNow: _buyNow,
           onBrandSelected: _openBrand,
@@ -2107,10 +2418,23 @@ class _StoreShellState extends State<StoreShell> {
           tax: _tax,
           shipping: _shipping,
           total: _cartTotal,
+          checkoutEmail: _checkoutEmail,
+          checkoutPhone: _checkoutPhone,
+          shippingAddress: _checkoutShippingAddress,
+          onCheckoutEmailChanged: (value) =>
+              setState(() => _checkoutEmail = value),
+          onCheckoutPhoneChanged: (value) =>
+              setState(() => _checkoutPhone = value),
+          onShippingAddressChanged: (value) {
+            setState(() => _checkoutShippingAddress = value);
+            unawaited(_refreshSelectedShippingRate());
+          },
           shippingOptions: _enabledShippingOptions,
-          selectedShippingOptionId: _selectedShippingOption.id,
-          onShippingOptionChanged: (value) =>
-              setState(() => _selectedShippingOptionId = value),
+          selectedShippingOptionId: _selectedShippingOptionId,
+          onShippingOptionChanged: (value) {
+            setState(() => _selectedShippingOptionId = value);
+            unawaited(_refreshSelectedShippingRate());
+          },
           onBackToCart: () => setState(() => _view = StoreView.cart),
           onPlaceOrder: _checkout,
           paymentMethods: _paymentMethods
@@ -2177,6 +2501,7 @@ class _StoreShellState extends State<StoreShell> {
                 coupons: _coupons,
                 paymentMethods: _paymentMethods,
                 shippingOptions: _shippingOptions,
+                shippingCredentials: _shippingCredentials,
                 noteOptions: _noteGuide.map((note) => note.name).toList(),
                 pendingNoteOptions: _pendingFragranceNotes,
                 familyOptions: _familyOptions,
@@ -2202,11 +2527,14 @@ class _StoreShellState extends State<StoreShell> {
                 onSavePayment: _savePayment,
                 onSaveShippingOption: _saveShippingOption,
                 onDeleteShippingOption: _deleteShippingOption,
+                onSaveShippingCredentials: _saveShippingCredentials,
                 onSaveStoreInfo: _saveStoreInfo,
                 onUploadStoreAsset: _uploadStoreAsset,
                 onSaveTaxRule: _saveTaxRule,
+                onDeleteTaxRule: _deleteTaxRule,
                 onSaveContent: _upsertContent,
                 onUpdateOrder: _updateOrder,
+                onCreateShippingLabel: _createShippingLabel,
                 onBatchUpdateOrders: _updateOrdersWithEmail,
                 onUpdateReview: _updateReview,
                 onSendEmail: _sendCustomerEmail,

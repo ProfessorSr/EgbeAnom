@@ -27,6 +27,10 @@ create table if not exists public.products (
   sort_order integer not null default 10,
   is_active boolean not null default true,
   description text not null default '',
+  vibe text not null default '',
+  performance text not null default '',
+  comparison text not null default '',
+  fragrance_profile text not null default '',
   ingredients text not null default '',
   top_notes text not null default '',
   heart_notes text not null default '',
@@ -102,6 +106,10 @@ alter table public.products
   add column if not exists sort_order integer not null default 10,
   add column if not exists is_active boolean not null default true,
   add column if not exists description text not null default '',
+  add column if not exists vibe text not null default '',
+  add column if not exists performance text not null default '',
+  add column if not exists comparison text not null default '',
+  add column if not exists fragrance_profile text not null default '',
   add column if not exists ingredients text not null default '',
   add column if not exists top_notes text not null default '',
   add column if not exists heart_notes text not null default '',
@@ -164,7 +172,7 @@ create table if not exists public.fragrance_occasions (
 );
 
 create table if not exists public.coupon_rules (
-  id text primary key,
+  id bigint generated always as identity primary key,
   code text not null unique,
   name text not null,
   discount_type text not null default 'percent',
@@ -512,6 +520,54 @@ alter table public.blocked_ips enable row level security;
 alter table public.site_settings enable row level security;
 alter table public.admin_notifications enable row level security;
 
+drop policy if exists "public product read" on public.products;
+drop policy if exists "public product image read" on public.product_images;
+drop policy if exists "public product variant read" on public.product_variants;
+drop policy if exists "public catalog metadata read" on public.categories;
+drop policy if exists "public brand read" on public.brand_profiles;
+drop policy if exists "public fragrance note read" on public.fragrance_notes;
+drop policy if exists "public fragrance family read" on public.fragrance_families;
+drop policy if exists "public fragrance season read" on public.fragrance_seasons;
+drop policy if exists "public fragrance occasion read" on public.fragrance_occasions;
+drop policy if exists "public shipping read" on public.shipping_options;
+drop policy if exists "public store info read" on public.store_info;
+drop policy if exists "public tax rule read" on public.tax_rules;
+drop policy if exists "public content read" on public.content_blocks;
+drop policy if exists "public site setting read" on public.site_settings;
+drop policy if exists "public approved review read" on public.store_reviews;
+drop policy if exists "public enabled payment read" on public.payment_methods;
+drop policy if exists "public active coupon read" on public.coupon_rules;
+drop policy if exists "customers own profile read" on public.store_customers;
+drop policy if exists "customers own email profile read" on public.store_customers;
+drop policy if exists "customers own profile insert" on public.store_customers;
+drop policy if exists "customers own profile update" on public.store_customers;
+drop policy if exists "customers own email profile update" on public.store_customers;
+drop policy if exists "backend users can read own profile" on public.backend_users;
+drop policy if exists "backend users can read own email profile" on public.backend_users;
+drop policy if exists "backend users can link own email profile" on public.backend_users;
+drop policy if exists "backend admins manage backend users" on public.backend_users;
+drop policy if exists "authenticated users can create orders" on public.orders;
+drop policy if exists "customers read own orders" on public.orders;
+drop policy if exists "customers read own order items" on public.order_items;
+drop policy if exists "authenticated users create reviews" on public.store_reviews;
+drop policy if exists "backend admins manage reviews" on public.store_reviews;
+drop policy if exists "verified customers create order surveys" on public.order_surveys;
+drop policy if exists "customers read own surveys" on public.order_surveys;
+drop policy if exists "backend admins manage products" on public.products;
+drop policy if exists "backend admins manage categories" on public.categories;
+drop policy if exists "backend admins manage product images" on public.product_images;
+drop policy if exists "backend admins manage product variants" on public.product_variants;
+drop policy if exists "backend admins manage notes" on public.fragrance_notes;
+drop policy if exists "backend admins manage coupons" on public.coupon_rules;
+drop policy if exists "backend admins manage store info" on public.store_info;
+drop policy if exists "backend admins manage tax rules" on public.tax_rules;
+drop policy if exists "backend admins manage orders" on public.orders;
+drop policy if exists "backend admins manage order items" on public.order_items;
+drop policy if exists "backend admins manage surveys" on public.order_surveys;
+drop policy if exists "backend admins manage settings" on public.site_settings;
+drop policy if exists "backend admins manage blocked ips" on public.blocked_ips;
+drop policy if exists "backend admins manage admin notifications" on public.admin_notifications;
+
 create policy "public product read" on public.products
   for select using (is_active = true or public.is_backend_admin());
 create policy "public product image read" on public.product_images
@@ -548,6 +604,11 @@ create policy "public approved review read" on public.store_reviews
   );
 create policy "public enabled payment read" on public.payment_methods
   for select using (is_enabled = true or public.is_backend_admin());
+create policy "public active coupon read" on public.coupon_rules
+  for select using (
+    (is_active = true and is_archived = false)
+    or public.is_backend_admin()
+  );
 
 create policy "customers own profile read" on public.store_customers
   for select using (auth_user_id = auth.uid() or public.is_backend_admin());
@@ -638,6 +699,8 @@ create policy "backend admins manage product images" on public.product_images
 create policy "backend admins manage product variants" on public.product_variants
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage notes" on public.fragrance_notes
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "backend admins manage coupons" on public.coupon_rules
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage store info" on public.store_info
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());

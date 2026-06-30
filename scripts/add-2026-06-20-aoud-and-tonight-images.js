@@ -20,7 +20,8 @@ const aoud = {
     'Bulgarian Rose, Powdery Violet Accord, Strawberry, Turkish Rose Absolute, Natural Laotian Oud, Vanilla, Amber, Benzoin',
   color: '#5A3A31',
   description:
-    'Aoud from Zamunda is a luxurious, opulent, and intensely romantic amber-woody-floral fragrance. Designed to evoke shimmering oriental silk against the skin, it has an incredibly smooth velveteen texture and room-filling sillage. Compare this to Oud Satin Mood.',
+    'Aoud from Zamunda is a luxurious, opulent, and intensely romantic amber-woody-floral fragrance. Designed to evoke shimmering oriental silk against the skin, it has an incredibly smooth velveteen texture and room-filling sillage.',
+  comparison: 'Compare this to Oud Satin Mood.',
   ingredients:
     'Extrait de Parfum, oil based, 30% concentration. Sweet, powdery, deeply floral, and resinous-woody with exceptional projection for 8 to 12+ hours on skin and multiple days on clothing.',
   top: 'Bulgarian Rose, Powdery Violet Accord, Strawberry',
@@ -182,6 +183,7 @@ async function main() {
     sort_order: 50,
     is_active: true,
     description: aoud.description,
+    comparison: aoud.comparison,
     ingredients: aoud.ingredients,
     top_notes: aoud.top,
     heart_notes: aoud.heart,

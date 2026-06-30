@@ -22,7 +22,8 @@ const products = [
     photo: 'products/1003/sauvegeur.png',
     color: '#173B68',
     description:
-      'Sauvageur is a fresh and woody men’s fragrance with a bold burst of citrus that dries down into a rich spicy and ambery-woody finish. It balances a clean fresh-out-of-the-shower vibe with confident masculine warmth. Compare this to Dior Sauvage.',
+      'Sauvageur is a fresh and woody men’s fragrance with a bold burst of citrus that dries down into a rich spicy and ambery-woody finish. It balances a clean fresh-out-of-the-shower vibe with confident masculine warmth.',
+    comparison: 'Compare this to Dior Sauvage.',
     ingredients:
       'Extrait de Parfum, oil based, 30% concentration. Known for exceptional longevity, mass appeal, and versatility from daytime wear to formal evenings.',
     top: 'Calabrian Bergamot, Black Pepper',
@@ -50,7 +51,8 @@ const products = [
     photo: 'products/1004/mama.png',
     color: '#D47A8B',
     description:
-      'Not Tonight Bae is a richer, darker, and more gourmand fragrance. Concentrated at 30% parfum strength, this amber-fruity-floral scent blends spicy black pepper, ginger, and powdery cocoa with sweet quince chutney, peach, and Moroccan jasmine, resting on a warm base of Indonesian patchouli and vanilla. Compare this to Pas Ce Soir Extrait by BDK.',
+      'Not Tonight Bae is a richer, darker, and more gourmand fragrance. Concentrated at 30% parfum strength, this amber-fruity-floral scent blends spicy black pepper, ginger, and powdery cocoa with sweet quince chutney, peach, and Moroccan jasmine, resting on a warm base of Indonesian patchouli and vanilla.',
+    comparison: 'Compare this to Pas Ce Soir Extrait by BDK.',
     ingredients:
       'Sensual, bold, and playful yet deeply mysterious. Extrait de Parfum, oil based, 30% concentration.',
     top: 'Pear, Ginger, Black Pepper, Cocoa, Mandarin Orange',
@@ -195,6 +197,7 @@ async function main() {
       sort_order: product.id - 990,
       is_active: true,
       description: product.description,
+      comparison: product.comparison,
       ingredients: product.ingredients,
       top_notes: product.top,
       heart_notes: product.heart,

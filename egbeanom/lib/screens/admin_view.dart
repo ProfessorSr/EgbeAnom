@@ -39,6 +39,7 @@ class AdminView extends StatefulWidget {
     required this.coupons,
     required this.paymentMethods,
     required this.shippingOptions,
+    required this.shippingCredentials,
     required this.noteOptions,
     required this.pendingNoteOptions,
     required this.familyOptions,
@@ -64,8 +65,10 @@ class AdminView extends StatefulWidget {
     required this.onSavePayment,
     required this.onSaveShippingOption,
     required this.onDeleteShippingOption,
+    required this.onSaveShippingCredentials,
     required this.onSaveContent,
     required this.onUpdateOrder,
+    required this.onCreateShippingLabel,
     required this.onBatchUpdateOrders,
     required this.onUpdateReview,
     required this.onSendEmail,
@@ -74,6 +77,7 @@ class AdminView extends StatefulWidget {
     required this.onSaveStoreInfo,
     required this.onUploadStoreAsset,
     required this.onSaveTaxRule,
+    required this.onDeleteTaxRule,
     required this.onSaveCustomer,
     required this.onBlockIp,
     required this.onSaveBackendUser,
@@ -89,6 +93,7 @@ class AdminView extends StatefulWidget {
   final List<CouponRule> coupons;
   final List<PaymentMethodConfig> paymentMethods;
   final List<ShippingOption> shippingOptions;
+  final Map<String, ShippingCarrierCredentials> shippingCredentials;
   final List<String> noteOptions;
   final List<String> pendingNoteOptions;
   final List<String> familyOptions;
@@ -114,12 +119,18 @@ class AdminView extends StatefulWidget {
   final AsyncValueChanged<Category> onSaveCategory;
   final ValueChanged<Category> onRemoveCategory;
   final AsyncValueChanged<CouponRule> onSaveCoupon;
-  final ValueChanged<PaymentMethodConfig> onTogglePayment;
-  final ValueChanged<PaymentMethodConfig> onSavePayment;
-  final ValueChanged<ShippingOption> onSaveShippingOption;
-  final ValueChanged<ShippingOption> onDeleteShippingOption;
-  final ValueChanged<ContentBlock> onSaveContent;
-  final ValueChanged<Order> onUpdateOrder;
+  final AsyncValueChanged<PaymentMethodConfig> onTogglePayment;
+  final AsyncValueChanged<PaymentMethodConfig> onSavePayment;
+  final AsyncValueChanged<ShippingOption> onSaveShippingOption;
+  final AsyncValueChanged<ShippingOption> onDeleteShippingOption;
+  final Future<void> Function(
+    String carrier,
+    ShippingCarrierCredentials credentials,
+  )
+  onSaveShippingCredentials;
+  final AsyncValueChanged<ContentBlock> onSaveContent;
+  final AsyncValueChanged<Order> onUpdateOrder;
+  final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
   final void Function(
     List<Order> orders,
     String fulfillmentStatus,
@@ -129,15 +140,16 @@ class AdminView extends StatefulWidget {
   final Future<void> Function(ReviewSummary review, String status)
   onUpdateReview;
   final void Function(String audience, String subject, String body) onSendEmail;
-  final ValueChanged<EmailServerSettings> onSaveEmailSettings;
-  final ValueChanged<SiteStatus> onUpdateSiteStatus;
-  final ValueChanged<StoreInfo> onSaveStoreInfo;
+  final AsyncValueChanged<EmailServerSettings> onSaveEmailSettings;
+  final AsyncValueChanged<SiteStatus> onUpdateSiteStatus;
+  final AsyncValueChanged<StoreInfo> onSaveStoreInfo;
   final Future<String> Function(UploadedImageFile file) onUploadStoreAsset;
-  final ValueChanged<TaxRule> onSaveTaxRule;
-  final ValueChanged<CustomerAccount> onSaveCustomer;
+  final AsyncValueChanged<TaxRule> onSaveTaxRule;
+  final AsyncValueChanged<TaxRule> onDeleteTaxRule;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
   final ValueChanged<String> onBlockIp;
-  final ValueChanged<BackendUser> onSaveBackendUser;
-  final ValueChanged<String> onApproveFragranceNote;
+  final AsyncValueChanged<BackendUser> onSaveBackendUser;
+  final AsyncValueChanged<String> onApproveFragranceNote;
 
   @override
   State<AdminView> createState() => _AdminViewState();
@@ -201,16 +213,16 @@ class _AdminViewState extends State<AdminView> {
                       id: DateTime.now().millisecondsSinceEpoch,
                       name: '',
                       type: 'Perfume',
-                      brand: 'Egbe Anom',
+                      brand: '',
                       notes: '',
-                      size: '50 ml',
+                      size: '',
                       price: 0,
                       stock: 0,
                       sold: 0,
                       featuredColor: const Color(0xFFC88F52),
-                      sku: 'EA-NEW-${widget.products.length + 1}',
+                      sku: '',
                       photoUrl: '',
-                      vendor: 'Egbe Anom',
+                      vendor: '',
                       categoryId: widget.categories.isEmpty
                           ? 1
                           : widget.categories.first.id,
@@ -314,8 +326,10 @@ class _AdminViewState extends State<AdminView> {
       ),
       AdminSection.shipping => _ShippingSection(
         options: widget.shippingOptions,
+        credentials: widget.shippingCredentials,
         onSave: widget.onSaveShippingOption,
         onDelete: widget.onDeleteShippingOption,
+        onSaveCredentials: widget.onSaveShippingCredentials,
       ),
       AdminSection.content => _ContentManagementSection(
         blocks: widget.contentBlocks,
@@ -334,6 +348,7 @@ class _AdminViewState extends State<AdminView> {
         shippingOptions: widget.shippingOptions,
         storeInfo: widget.storeInfo,
         onUpdateOrder: widget.onUpdateOrder,
+        onCreateShippingLabel: widget.onCreateShippingLabel,
         onBatchUpdateOrders: widget.onBatchUpdateOrders,
       ),
       AdminSection.invoices => _InvoicesSection(
@@ -366,6 +381,7 @@ class _AdminViewState extends State<AdminView> {
       AdminSection.taxes => _TaxRulesSection(
         taxRules: widget.taxRules,
         onSave: widget.onSaveTaxRule,
+        onDelete: widget.onDeleteTaxRule,
       ),
       AdminSection.backendUsers => _BackendUsersSection(
         users: widget.backendUsers,
@@ -450,16 +466,16 @@ class _AdminLoginViewState extends State<AdminLoginView> {
                 children: [
                   Icon(
                     Icons.admin_panel_settings_outlined,
-                    size: 42,
-                    color: Theme.of(context).colorScheme.primary,
+                    size: 44,
+                    color: const Color(0xFFC88F52),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(
-                    'Admin sign in',
+                    'Admin portal',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: Theme.of(context).textTheme.headlineSmall,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                   TextField(
                     controller: _email,
                     decoration: const InputDecoration(
@@ -644,9 +660,7 @@ class _AdminOverview extends StatefulWidget {
 }
 
 class _AdminOverviewState extends State<_AdminOverview> {
-  int _ordersDays = 7;
-  int _usersDays = 7;
-  int _revenueDays = 7;
+  int _windowDays = 14;
 
   List<DailyMetric> _lastMetrics(int days) {
     if (widget.dailyMetrics.length <= days) {
@@ -655,12 +669,20 @@ class _AdminOverviewState extends State<_AdminOverview> {
     return widget.dailyMetrics.sublist(widget.dailyMetrics.length - days);
   }
 
+  List<DailyMetric> get _windowMetrics => _lastMetrics(_windowDays);
+
   int get _ordersInWindow =>
-      _lastMetrics(_ordersDays).fold(0, (sum, metric) => sum + metric.orders);
+      _windowMetrics.fold(0, (sum, metric) => sum + metric.orders);
   int get _usersInWindow =>
-      _lastMetrics(_usersDays).fold(0, (sum, metric) => sum + metric.newUsers);
+      _windowMetrics.fold(0, (sum, metric) => sum + metric.newUsers);
   double get _revenueInWindow =>
-      _lastMetrics(_revenueDays).fold(0, (sum, metric) => sum + metric.revenue);
+      _windowMetrics.fold(0, (sum, metric) => sum + metric.revenue);
+  int get _visitsInWindow =>
+      _windowMetrics.fold(0, (sum, metric) => sum + metric.visits);
+  double get _averageOrderValue =>
+      _ordersInWindow == 0 ? 0 : _revenueInWindow / _ordersInWindow;
+  double get _revenuePerVisit =>
+      _visitsInWindow == 0 ? 0 : _revenueInWindow / _visitsInWindow;
 
   @override
   Widget build(BuildContext context) {
@@ -674,65 +696,83 @@ class _AdminOverviewState extends State<_AdminOverview> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              SizedBox(
-                width: 240,
-                child: Text(
-                  'Dashboard ranges',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(color: Colors.white),
-                ),
+              Text(
+                'Overview window',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: Colors.white),
               ),
               _RangeSelect(
-                label: 'Orders',
-                value: _ordersDays,
-                onChanged: (value) => setState(() => _ordersDays = value),
+                label: 'Time range',
+                value: _windowDays,
+                onChanged: (value) => setState(() => _windowDays = value),
               ),
-              _RangeSelect(
-                label: 'Users',
-                value: _usersDays,
-                onChanged: (value) => setState(() => _usersDays = value),
-              ),
-              _RangeSelect(
-                label: 'Revenue',
-                value: _revenueDays,
-                onChanged: (value) => setState(() => _revenueDays = value),
-              ),
+              Text('Showing last $_windowDays days of activity'),
             ],
           ),
         ),
         const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Performance summary',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Revenue is ${currency(_revenueInWindow)} from $_ordersInWindow orders, with ${widget.conversionRate.toStringAsFixed(1)}% conversion and ${currency(_averageOrderValue)} average order value.',
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Acquisition added $_usersInWindow users and generated $_visitsInWindow visits (${currency(_revenuePerVisit)} revenue per visit).',
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Key performance indicators',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(color: Colors.white),
+        ),
+        const SizedBox(height: 8),
         _MetricGrid(
           metrics: [
             _MetricData(
               Icons.payments_outlined,
-              'Revenue past $_revenueDays days',
+              'Revenue ($_windowDays days)',
               currency(_revenueInWindow),
             ),
             _MetricData(
               Icons.receipt_long_outlined,
-              'Orders past $_ordersDays days',
+              'Orders ($_windowDays days)',
               '$_ordersInWindow',
             ),
             _MetricData(
-              Icons.inventory_2_outlined,
-              'On hand',
-              '${widget.inventory} units',
+              Icons.analytics_outlined,
+              'Avg order value',
+              currency(_averageOrderValue),
             ),
             _MetricData(
-              Icons.lock_clock_outlined,
-              'In carts',
-              '${widget.reservedInventory} units',
+              Icons.swap_vert_circle_outlined,
+              'Revenue per visit',
+              currency(_revenuePerVisit),
             ),
             _MetricData(
               Icons.person_add_alt,
-              'New today',
-              '${widget.newUsersToday} users',
+              'New users today',
+              '${widget.newUsersToday}',
             ),
             _MetricData(
               Icons.groups_outlined,
-              'New past $_usersDays days',
-              '$_usersInWindow users',
+              'New users ($_windowDays days)',
+              '$_usersInWindow',
             ),
             _MetricData(
               Icons.trending_up,
@@ -740,27 +780,37 @@ class _AdminOverviewState extends State<_AdminOverview> {
               '${widget.conversionRate.toStringAsFixed(1)}%',
             ),
             _MetricData(
-              Icons.shopping_bag_outlined,
-              'Cart value',
-              currency(widget.cartValue),
+              Icons.visibility_outlined,
+              'Visits ($_windowDays days)',
+              '$_visitsInWindow',
             ),
           ],
         ),
         const SizedBox(height: 18),
+        Text(
+          'Trend charts',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(color: Colors.white),
+        ),
+        const SizedBox(height: 8),
         _DashboardChartGrid(
           products: widget.products,
-          dailyMetrics: _lastMetrics(
-            math.max(_ordersDays, math.max(_usersDays, _revenueDays)),
-          ),
+          dailyMetrics: _windowMetrics,
           activeCarts: widget.activeCarts,
           onOpenSection: widget.onOpenSection,
         ),
         const SizedBox(height: 18),
+        Text(
+          'Operational insights',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(color: Colors.white),
+        ),
+        const SizedBox(height: 8),
         _CommerceDashboardPanels(
           products: widget.products,
-          metrics: _lastMetrics(
-            math.max(_ordersDays, math.max(_usersDays, _revenueDays)),
-          ),
+          metrics: _windowMetrics,
           activeCarts: widget.activeCarts,
           sessions: widget.sessions,
           orders: widget.orders,
@@ -777,7 +827,7 @@ class _AdminOverviewState extends State<_AdminOverview> {
               children: [
                 Expanded(
                   flex: wide ? 6 : 0,
-                  child: _DailyTrendPanel(metrics: _lastMetrics(_revenueDays)),
+                  child: _DailyTrendPanel(metrics: _windowMetrics),
                 ),
                 if (wide)
                   const SizedBox(width: 16)
@@ -833,6 +883,7 @@ class _RangeSelect extends StatelessWidget {
           isDense: true,
         ),
         items: const [
+          DropdownMenuItem(value: 1, child: Text('1 day')),
           DropdownMenuItem(value: 7, child: Text('7 days')),
           DropdownMenuItem(value: 14, child: Text('14 days')),
           DropdownMenuItem(value: 30, child: Text('30 days')),
@@ -1728,7 +1779,7 @@ class _CatalogSection extends StatelessWidget {
   final Fragrance? editing;
   final ValueChanged<Fragrance> onEdit;
   final ProductRemoveCallback onRemove;
-  final ValueChanged<String> onApproveFragranceNote;
+  final AsyncValueChanged<String> onApproveFragranceNote;
   final Future<List<ProductImage>> Function(
     Fragrance product,
     List<UploadedImageFile> files,
@@ -1813,7 +1864,7 @@ class _PendingNotesPanel extends StatelessWidget {
   const _PendingNotesPanel({required this.notes, required this.onApprove});
 
   final List<String> notes;
-  final ValueChanged<String> onApprove;
+  final AsyncValueChanged<String> onApprove;
 
   @override
   Widget build(BuildContext context) {
@@ -2519,26 +2570,43 @@ class _PromotionsSectionState extends State<_PromotionsSection> {
   }
 
   Future<void> _setArchived(CouponRule coupon, bool archived) async {
-    await widget.onSave(
-      CouponRule(
-        code: coupon.code,
-        name: coupon.name,
-        type: coupon.type,
-        value: coupon.value,
-        minimumSpend: coupon.minimumSpend,
-        usageLimit: coupon.usageLimit,
-        used: coupon.used,
-        starts: coupon.starts,
-        ends: coupon.ends,
-        isActive: archived ? false : coupon.isActive,
-        isArchived: archived,
-      ),
-    );
-    if (mounted) {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.onSave(
+        CouponRule(
+          code: coupon.code,
+          name: coupon.name,
+          type: coupon.type,
+          value: coupon.value,
+          minimumSpend: coupon.minimumSpend,
+          usageLimit: coupon.usageLimit,
+          used: coupon.used,
+          starts: coupon.starts,
+          ends: coupon.ends,
+          isActive: archived ? false : coupon.isActive,
+          isArchived: archived,
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
       setState(() => _editing = null);
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text(archived ? 'Coupon archived.' : 'Coupon unarchived.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            archived
+                ? 'Coupon archive failed: $error'
+                : 'Coupon unarchive failed: $error',
+          ),
         ),
       );
     }
@@ -2770,8 +2838,8 @@ class _PaymentsSection extends StatefulWidget {
   });
 
   final List<PaymentMethodConfig> methods;
-  final ValueChanged<PaymentMethodConfig> onToggle;
-  final ValueChanged<PaymentMethodConfig> onSave;
+  final AsyncValueChanged<PaymentMethodConfig> onToggle;
+  final AsyncValueChanged<PaymentMethodConfig> onSave;
 
   @override
   State<_PaymentsSection> createState() => _PaymentsSectionState();
@@ -2848,8 +2916,8 @@ class _PaymentsSectionState extends State<_PaymentsSection> {
                     method:
                         _editing ??
                         (widget.methods.isEmpty ? null : widget.methods.first),
-                    onSave: (method) {
-                      widget.onSave(method);
+                    onSave: (method) async {
+                      await widget.onSave(method);
                       setState(() => _editing = method);
                     },
                   ),
@@ -2867,7 +2935,7 @@ class _PaymentMethodEditor extends StatefulWidget {
   const _PaymentMethodEditor({required this.method, required this.onSave});
 
   final PaymentMethodConfig? method;
-  final ValueChanged<PaymentMethodConfig> onSave;
+  final AsyncValueChanged<PaymentMethodConfig> onSave;
 
   @override
   State<_PaymentMethodEditor> createState() => _PaymentMethodEditorState();
@@ -2876,6 +2944,7 @@ class _PaymentMethodEditor extends StatefulWidget {
 class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
   late TextEditingController _publicKey;
   late TextEditingController _merchantId;
+  late TextEditingController _apiSecret;
   late TextEditingController _webhookUrl;
   late TextEditingController _descriptor;
   late String _mode;
@@ -2899,6 +2968,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
     final method = widget.method;
     _publicKey = TextEditingController(text: method?.publicKey ?? '');
     _merchantId = TextEditingController(text: method?.merchantId ?? '');
+    _apiSecret = TextEditingController(text: method?.apiSecret ?? '');
     _webhookUrl = TextEditingController(text: method?.webhookUrl ?? '');
     _descriptor = TextEditingController(
       text: method?.statementDescriptor ?? 'EGBE ANOM',
@@ -2909,6 +2979,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
   void _disposeControllers() {
     _publicKey.dispose();
     _merchantId.dispose();
+    _apiSecret.dispose();
     _webhookUrl.dispose();
     _descriptor.dispose();
   }
@@ -2973,6 +3044,15 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
             ),
             const SizedBox(height: 10),
             TextField(
+              controller: _apiSecret,
+              decoration: InputDecoration(
+                labelText: labels.apiSecret,
+                prefixIcon: const Icon(Icons.lock_outlined),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 10),
+            TextField(
               controller: _webhookUrl,
               decoration: InputDecoration(
                 labelText: labels.webhook,
@@ -3008,6 +3088,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
                   mode: _mode,
                   publicKey: _publicKey.text.trim(),
                   merchantId: _merchantId.text.trim(),
+                  apiSecret: _apiSecret.text.trim(),
                   webhookUrl: _webhookUrl.text.trim(),
                   statementDescriptor: _descriptor.text.trim(),
                 ),
@@ -3026,6 +3107,7 @@ class _PaymentProviderLabels {
   const _PaymentProviderLabels({
     required this.publicKey,
     required this.merchantId,
+    required this.apiSecret,
     required this.webhook,
     required this.descriptor,
     required this.returnUrls,
@@ -3034,6 +3116,7 @@ class _PaymentProviderLabels {
 
   final String publicKey;
   final String merchantId;
+  final String apiSecret;
   final String webhook;
   final String descriptor;
   final String returnUrls;
@@ -3044,6 +3127,7 @@ class _PaymentProviderLabels {
       return const _PaymentProviderLabels(
         publicKey: 'Stripe publishable key',
         merchantId: 'Stripe account ID',
+        apiSecret: 'Stripe secret key',
         webhook: 'Stripe webhook endpoint',
         descriptor: 'Stripe statement descriptor',
         returnUrls:
@@ -3056,6 +3140,7 @@ class _PaymentProviderLabels {
       return const _PaymentProviderLabels(
         publicKey: 'PayPal client ID',
         merchantId: 'PayPal merchant ID',
+        apiSecret: 'PayPal client secret',
         webhook: 'PayPal webhook ID / endpoint',
         descriptor: 'PayPal invoice prefix',
         returnUrls:
@@ -3068,6 +3153,7 @@ class _PaymentProviderLabels {
       return const _PaymentProviderLabels(
         publicKey: 'Square application ID',
         merchantId: 'Square location ID',
+        apiSecret: 'Square access token',
         webhook: 'Square webhook signature key / endpoint',
         descriptor: 'Square statement descriptor',
         returnUrls:
@@ -3080,6 +3166,7 @@ class _PaymentProviderLabels {
       return const _PaymentProviderLabels(
         publicKey: 'Wallet merchant identifier',
         merchantId: 'Processor merchant account',
+        apiSecret: 'Processor certificate or token',
         webhook: 'Wallet processor callback',
         descriptor: 'Wallet display name',
         returnUrls:
@@ -3091,6 +3178,7 @@ class _PaymentProviderLabels {
     return const _PaymentProviderLabels(
       publicKey: 'Provider public key / client ID',
       merchantId: 'Provider merchant account ID',
+      apiSecret: 'Provider secret key or API token',
       webhook: 'Provider webhook endpoint',
       descriptor: 'Statement descriptor',
       returnUrls:
@@ -3104,13 +3192,21 @@ class _PaymentProviderLabels {
 class _ShippingSection extends StatefulWidget {
   const _ShippingSection({
     required this.options,
+    required this.credentials,
     required this.onSave,
     required this.onDelete,
+    required this.onSaveCredentials,
   });
 
   final List<ShippingOption> options;
-  final ValueChanged<ShippingOption> onSave;
-  final ValueChanged<ShippingOption> onDelete;
+  final Map<String, ShippingCarrierCredentials> credentials;
+  final AsyncValueChanged<ShippingOption> onSave;
+  final AsyncValueChanged<ShippingOption> onDelete;
+  final Future<void> Function(
+    String carrier,
+    ShippingCarrierCredentials credentials,
+  )
+  onSaveCredentials;
 
   @override
   State<_ShippingSection> createState() => _ShippingSectionState();
@@ -3119,12 +3215,6 @@ class _ShippingSection extends StatefulWidget {
 class _ShippingSectionState extends State<_ShippingSection> {
   String _selectedCarrier = 'USPS';
   String? _editingCarrier;
-  final Map<String, ShippingCarrierCredentials> _credentials = {
-    'USPS': const ShippingCarrierCredentials(),
-    'UPS': const ShippingCarrierCredentials(),
-    'FedEx': const ShippingCarrierCredentials(),
-    'DHL': const ShippingCarrierCredentials(),
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -3200,7 +3290,7 @@ class _ShippingSectionState extends State<_ShippingSection> {
                     ).any((option) => option.isEnabled),
                     selected: carrier == _selectedCarrier,
                     configured:
-                        (_credentials[carrier] ??
+                        (widget.credentials[carrier] ??
                                 const ShippingCarrierCredentials())
                             .isConfigured,
                     methodCount: _carrierMethods(carrier).length,
@@ -3281,17 +3371,18 @@ class _ShippingSectionState extends State<_ShippingSection> {
                         _ShippingProviderCredentialsCard(
                           carrier: _editingCarrier!,
                           credentials:
-                              _credentials[_editingCarrier!] ??
+                              widget.credentials[_editingCarrier!] ??
                               const ShippingCarrierCredentials(),
                           onSave: (credentials) {
+                            final carrier = _editingCarrier!;
                             setState(() {
-                              _credentials[_editingCarrier!] = credentials;
                               _editingCarrier = null;
                             });
+                            widget.onSaveCredentials(carrier, credentials);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  '${_editingCarrier ?? _selectedCarrier} credentials staged for backend shipping services.',
+                                  '$carrier credentials saved for backend shipping services.',
                                 ),
                               ),
                             );
@@ -3589,7 +3680,7 @@ class _FlatRateShippingCard extends StatefulWidget {
   });
 
   final ShippingOption option;
-  final ValueChanged<ShippingOption> onSave;
+  final AsyncValueChanged<ShippingOption> onSave;
   final VoidCallback onDisable;
 
   @override
@@ -3871,6 +3962,23 @@ class _ShippingProviderCredentialsCardState
   }
 
   @override
+  void didUpdateWidget(covariant _ShippingProviderCredentialsCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.carrier == widget.carrier &&
+        oldWidget.credentials == widget.credentials) {
+      return;
+    }
+    final credentials = widget.credentials;
+    _customerId.text = credentials.customerId;
+    _accountNumber.text = credentials.accountNumber;
+    _apiKey.text = credentials.apiKey;
+    _apiSecret.text = credentials.apiSecret;
+    _meterNumber.text = credentials.meterNumber;
+    _clientId.text = credentials.clientId;
+    _clientSecret.text = credentials.clientSecret;
+  }
+
+  @override
   void dispose() {
     _customerId.dispose();
     _accountNumber.dispose();
@@ -3884,6 +3992,7 @@ class _ShippingProviderCredentialsCardState
 
   @override
   Widget build(BuildContext context) {
+    final carrier = widget.carrier.trim().toUpperCase();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -3906,43 +4015,155 @@ class _ShippingProviderCredentialsCardState
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    _credentialField(
-                      controller: _customerId,
-                      label: 'Customer ID',
-                      wide: wide,
-                    ),
-                    _credentialField(
-                      controller: _accountNumber,
-                      label: 'Account number',
-                      wide: wide,
-                    ),
-                    _credentialField(
-                      controller: _apiKey,
-                      label: 'API key',
-                      wide: wide,
-                    ),
-                    _credentialField(
-                      controller: _apiSecret,
-                      label: 'API secret',
-                      wide: wide,
-                      obscure: true,
-                    ),
-                    _credentialField(
-                      controller: _meterNumber,
-                      label: 'Meter number',
-                      wide: wide,
-                    ),
-                    _credentialField(
-                      controller: _clientId,
-                      label: 'OAuth client ID',
-                      wide: wide,
-                    ),
-                    _credentialField(
-                      controller: _clientSecret,
-                      label: 'OAuth client secret',
-                      wide: wide,
-                      obscure: true,
-                    ),
+                    if (carrier == 'USPS') ...[
+                      _credentialField(
+                        controller: _customerId,
+                        label: 'Customer registration ID (CRID)',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _accountNumber,
+                        label: 'EPS account number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _meterNumber,
+                        label: 'Mailer ID (MID)',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiKey,
+                        label: 'Manifest MID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _clientId,
+                        label: 'USPS consumer key',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _clientSecret,
+                        label: 'USPS consumer secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                    ] else if (carrier == 'UPS') ...[
+                      _credentialField(
+                        controller: _accountNumber,
+                        label: 'UPS shipper account number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiKey,
+                        label: 'UPS API key',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiSecret,
+                        label: 'UPS API secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                      _credentialField(
+                        controller: _clientId,
+                        label: 'UPS OAuth client ID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _clientSecret,
+                        label: 'UPS OAuth client secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                    ] else if (carrier == 'FEDEX') ...[
+                      _credentialField(
+                        controller: _accountNumber,
+                        label: 'FedEx account number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _meterNumber,
+                        label: 'FedEx meter number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiKey,
+                        label: 'FedEx API key',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiSecret,
+                        label: 'FedEx API secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                      _credentialField(
+                        controller: _clientId,
+                        label: 'FedEx OAuth client ID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _clientSecret,
+                        label: 'FedEx OAuth client secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                    ] else if (carrier == 'DHL') ...[
+                      _credentialField(
+                        controller: _accountNumber,
+                        label: 'DHL account number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _customerId,
+                        label: 'DHL site ID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiKey,
+                        label: 'DHL API key',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiSecret,
+                        label: 'DHL API password',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                      _credentialField(
+                        controller: _clientId,
+                        label: 'DHL API client ID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _clientSecret,
+                        label: 'DHL API client secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                    ] else ...[
+                      _credentialField(
+                        controller: _customerId,
+                        label: '${widget.carrier} site ID',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _accountNumber,
+                        label: '${widget.carrier} account number',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiKey,
+                        label: '${widget.carrier} API key',
+                        wide: wide,
+                      ),
+                      _credentialField(
+                        controller: _apiSecret,
+                        label: '${widget.carrier} API password/secret',
+                        wide: wide,
+                        obscure: true,
+                      ),
+                    ],
                   ],
                 );
               },
@@ -3999,7 +4220,7 @@ class _ShippingOptionEditor extends StatefulWidget {
   const _ShippingOptionEditor({required this.option, required this.onSave});
 
   final ShippingOption? option;
-  final ValueChanged<ShippingOption> onSave;
+  final AsyncValueChanged<ShippingOption> onSave;
 
   @override
   State<_ShippingOptionEditor> createState() => _ShippingOptionEditorState();
@@ -4269,7 +4490,7 @@ class _ContentManagementSection extends StatelessWidget {
   const _ContentManagementSection({required this.blocks, required this.onSave});
 
   final List<ContentBlock> blocks;
-  final ValueChanged<ContentBlock> onSave;
+  final AsyncValueChanged<ContentBlock> onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -4306,7 +4527,7 @@ class ContentBlockCard extends StatefulWidget {
   });
 
   final ContentBlock block;
-  final ValueChanged<ContentBlock> onSave;
+  final AsyncValueChanged<ContentBlock> onSave;
 
   @override
   State<ContentBlockCard> createState() => _ContentBlockCardState();
@@ -4424,7 +4645,7 @@ class _CustomersSection extends StatefulWidget {
   final List<Order> orders;
   final List<ActiveCart> activeCarts;
   final StoreInfo storeInfo;
-  final ValueChanged<CustomerAccount> onSaveCustomer;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
   final ValueChanged<String> onBlockIp;
 
   @override
@@ -4658,7 +4879,7 @@ class _CustomerProfilePanel extends StatelessWidget {
   final List<Order> orders;
   final List<ActiveCart> carts;
   final StoreInfo storeInfo;
-  final ValueChanged<CustomerAccount> onSaveCustomer;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
   final ValueChanged<String> onBlockIp;
 
   @override
@@ -4896,13 +5117,15 @@ class _OrdersSection extends StatefulWidget {
     required this.shippingOptions,
     required this.storeInfo,
     required this.onUpdateOrder,
+    required this.onCreateShippingLabel,
     required this.onBatchUpdateOrders,
   });
 
   final List<Order> orders;
   final List<ShippingOption> shippingOptions;
   final StoreInfo storeInfo;
-  final ValueChanged<Order> onUpdateOrder;
+  final AsyncValueChanged<Order> onUpdateOrder;
+  final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
   final void Function(
     List<Order> orders,
     String fulfillmentStatus,
@@ -4920,6 +5143,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
   String _statusFilter = 'All';
   String _batchAction = 'Print Pack List';
   String _printPacket = '';
+  bool _isApplyingBatchAction = false;
 
   List<Order> get _visibleOrders {
     final orders = widget.orders.where((order) {
@@ -4995,7 +5219,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
     widget.onBatchUpdateOrders(orders, 'Processing', 'Not requested');
     final packet = orders
         .map((order) => _packListHtml(order, widget.storeInfo))
-        .join('\n');
+        .join('\n<div class="egbeanom-page-break"></div>\n');
     setState(() {
       _printPacket = _buildPrintPacket(orders);
     });
@@ -5009,11 +5233,71 @@ class _OrdersSectionState extends State<_OrdersSection> {
     }
     final packet = orders
         .map((order) => _invoiceHtml(order, widget.storeInfo, printLite: true))
-        .join('\n');
+        .join('\n<div class="egbeanom-page-break"></div>\n');
     setState(() {
       _printPacket = orders.map(_buildInvoicePacket).join('\n\n');
     });
     printHtmlDocument('Egbe Anom invoices', packet);
+  }
+
+  Future<void> _printShippingLabels() async {
+    final orders = _selectedOrders;
+    if (orders.isEmpty || _isApplyingBatchAction) {
+      return;
+    }
+
+    setState(() {
+      _isApplyingBatchAction = true;
+    });
+
+    final completed = <Order>[];
+    final failures = <String>[];
+    for (final order in orders) {
+      try {
+        await widget.onCreateShippingLabel(order);
+        completed.add(order);
+      } catch (_) {
+        failures.add(order.id);
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (completed.isNotEmpty) {
+      // Label creation sends status to Label created and queues customer update email.
+      widget.onBatchUpdateOrders(completed, 'Label created', 'Label created');
+    }
+
+    setState(() {
+      _isApplyingBatchAction = false;
+      _printPacket = _buildStatusPacket(
+        completed,
+        'Label created',
+        'Label created',
+      );
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (completed.isNotEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Printed ${completed.length} label(s). Status set to Label created and customer email queued.',
+          ),
+        ),
+      );
+    }
+    if (failures.isNotEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Label creation failed for ${failures.length} order(s): ${failures.join(', ')}',
+          ),
+        ),
+      );
+    }
   }
 
   void _batchStatus(String fulfillmentStatus, String labelStatus) {
@@ -5027,20 +5311,16 @@ class _OrdersSectionState extends State<_OrdersSection> {
     });
   }
 
-  void _applyBatchAction() {
+  Future<void> _applyBatchAction() async {
     switch (_batchAction) {
       case 'Print Invoice':
         _printInvoices();
       case 'Print Pack List':
         _printSelected();
-      case 'Pending':
-        _batchStatus('Pending', 'Not requested');
+      case 'Print label':
+        await _printShippingLabels();
       case 'Shipped':
-        _batchStatus('Shipped', 'Printed');
-      case 'Processing':
-        _batchStatus('Processing', 'Not requested');
-      case 'Label Printed':
-        _batchStatus('Label Printed', 'Printed');
+        _batchStatus('Shipped', 'Shipped');
     }
   }
 
@@ -5224,8 +5504,8 @@ class _OrdersSectionState extends State<_OrdersSection> {
                             child: Text('Processing'),
                           ),
                           DropdownMenuItem(
-                            value: 'Label Printed',
-                            child: Text('Label Printed'),
+                            value: 'Label created',
+                            child: Text('Label created'),
                           ),
                           DropdownMenuItem(
                             value: 'Shipped',
@@ -5240,9 +5520,13 @@ class _OrdersSectionState extends State<_OrdersSection> {
                     FilledButton.icon(
                       onPressed: _selectedOrderIds.isEmpty
                           ? null
-                          : _applyBatchAction,
+                          : () => _applyBatchAction(),
                       icon: const Icon(Icons.task_alt_outlined),
-                      label: const Text('Apply to selected'),
+                      label: Text(
+                        _isApplyingBatchAction
+                            ? 'Applying...'
+                            : 'Apply to selected',
+                      ),
                     ),
                     SizedBox(
                       width: 220,
@@ -5261,33 +5545,18 @@ class _OrdersSectionState extends State<_OrdersSection> {
                             child: Text('Print Pack List'),
                           ),
                           DropdownMenuItem(
-                            value: 'Pending',
-                            child: Text('Change to Pending'),
+                            value: 'Print label',
+                            child: Text('Print label'),
                           ),
                           DropdownMenuItem(
                             value: 'Shipped',
-                            child: Text('Change to Shipped'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Processing',
-                            child: Text('Change to Processing'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Label Printed',
-                            child: Text('Change to Label Printed'),
+                            child: Text('Shipped'),
                           ),
                         ],
                         onChanged: (value) => setState(
                           () => _batchAction = value ?? _batchAction,
                         ),
                       ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _selectedOrderIds.isEmpty
-                          ? null
-                          : () => _batchStatus('Shipped', 'Printed'),
-                      icon: const Icon(Icons.local_shipping_outlined),
-                      label: const Text('Batch shipped'),
                     ),
                   ],
                 ),
@@ -5348,6 +5617,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
                         child: _OrderFulfillmentEditor(
                           order: order,
                           onSave: widget.onUpdateOrder,
+                          onCreateShippingLabel: widget.onCreateShippingLabel,
                         ),
                       ),
                     ],
@@ -5566,9 +5836,9 @@ class _ReviewsSection extends StatelessWidget {
                           icon: const Icon(Icons.check),
                         ),
                         IconButton.outlined(
-                          tooltip: 'Reject',
+                          tooltip: 'Delete',
                           onPressed: () => onUpdateReview(review, 'rejected'),
-                          icon: const Icon(Icons.close),
+                          icon: const Icon(Icons.delete_outline),
                         ),
                       ],
                     ),
@@ -6266,7 +6536,7 @@ class _EmailSection extends StatefulWidget {
   final List<CustomerAccount> customers;
   final EmailServerSettings settings;
   final void Function(String audience, String subject, String body) onSendEmail;
-  final ValueChanged<EmailServerSettings> onSaveSettings;
+  final AsyncValueChanged<EmailServerSettings> onSaveSettings;
 
   @override
   State<_EmailSection> createState() => _EmailSectionState();
@@ -6601,7 +6871,7 @@ class _SiteStatusSection extends StatefulWidget {
 
   final SiteStatus status;
   final List<Fragrance> products;
-  final ValueChanged<SiteStatus> onSave;
+  final AsyncValueChanged<SiteStatus> onSave;
 
   @override
   State<_SiteStatusSection> createState() => _SiteStatusSectionState();
@@ -6869,30 +7139,56 @@ class _SiteStatusSectionState extends State<_SiteStatusSection> {
                       ),
                       const SizedBox(height: 14),
                       FilledButton.icon(
-                        onPressed: () => widget.onSave(
-                          SiteStatus(
-                            isLive: _isLive,
-                            measurementSystem: _measurementSystem,
-                            message: _message.text.trim().isEmpty
-                                ? SiteStatus().message
-                                : _message.text.trim(),
-                            returnPolicy: _returnPolicy.text.trim().isEmpty
-                                ? SiteStatus().returnPolicy
-                                : _returnPolicy.text.trim(),
-                            googleAnalyticsMeasurementId: _googleAnalyticsId
-                                .text
-                                .trim(),
-                            showNoteEncyclopedia: _showNoteEncyclopedia,
-                            showIngredientProfiles: _showIngredientProfiles,
-                            showBrandProfile: _showBrandProfile,
-                            showRecommendations: _showRecommendations,
-                            showLatestFragranceNews: _showLatestFragranceNews,
-                            showCommunity: _showCommunity,
-                            showCompanyReviews: _showCompanyReviews,
-                            homeShelfMode: _homeShelfMode,
-                            featuredProductIds: _featuredProductIds.toList(),
-                          ),
-                        ),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await widget.onSave(
+                              SiteStatus(
+                                isLive: _isLive,
+                                measurementSystem: _measurementSystem,
+                                message: _message.text.trim().isEmpty
+                                    ? SiteStatus().message
+                                    : _message.text.trim(),
+                                returnPolicy: _returnPolicy.text.trim().isEmpty
+                                    ? SiteStatus().returnPolicy
+                                    : _returnPolicy.text.trim(),
+                                googleAnalyticsMeasurementId: _googleAnalyticsId
+                                    .text
+                                    .trim(),
+                                showNoteEncyclopedia: _showNoteEncyclopedia,
+                                showIngredientProfiles: _showIngredientProfiles,
+                                showBrandProfile: _showBrandProfile,
+                                showRecommendations: _showRecommendations,
+                                showLatestFragranceNews:
+                                    _showLatestFragranceNews,
+                                showCommunity: _showCommunity,
+                                showCompanyReviews: _showCompanyReviews,
+                                homeShelfMode: _homeShelfMode,
+                                featuredProductIds: _featuredProductIds
+                                    .toList(),
+                              ),
+                            );
+                            if (!context.mounted) {
+                              return;
+                            }
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Site settings saved.'),
+                              ),
+                            );
+                          } catch (error) {
+                            if (!context.mounted) {
+                              return;
+                            }
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Site settings save failed: $error',
+                                ),
+                              ),
+                            );
+                          }
+                        },
                         icon: const Icon(Icons.save_outlined),
                         label: const Text('Save site status'),
                       ),
@@ -6942,7 +7238,7 @@ class _StoreInfoSection extends StatefulWidget {
   });
 
   final StoreInfo storeInfo;
-  final ValueChanged<StoreInfo> onSave;
+  final AsyncValueChanged<StoreInfo> onSave;
   final Future<String> Function(UploadedImageFile file) onUploadAsset;
 
   @override
@@ -7174,40 +7470,58 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
     }
   }
 
-  void _save() {
-    widget.onSave(
-      StoreInfo(
-        storeName: _storeName.text.trim(),
-        displayName: _displayName.text.trim(),
-        bannerUrl: _bannerUrl.text.trim(),
-        logoUrl: _logoUrl.text.trim(),
-        addressLine1: _address1.text.trim(),
-        addressLine2: _address2.text.trim(),
-        city: _city.text.trim(),
-        state: _state.text.trim(),
-        postalCode: _postal.text.trim(),
-        country: _country.text.trim().isEmpty ? 'US' : _country.text.trim(),
-        email: _email.text.trim(),
-        phone: _phone.text.trim(),
-        fax: _fax.text.trim(),
-        facebookUrl: _facebook.text.trim(),
-        instagramUrl: _instagram.text.trim(),
-        tiktokUrl: _tiktok.text.trim(),
-        xUrl: _x.text.trim(),
-        youtubeUrl: _youtube.text.trim(),
-      ),
-    );
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Store info saved.')));
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.onSave(
+        StoreInfo(
+          storeName: _storeName.text.trim(),
+          displayName: _displayName.text.trim(),
+          bannerUrl: _bannerUrl.text.trim(),
+          logoUrl: _logoUrl.text.trim(),
+          addressLine1: _address1.text.trim(),
+          addressLine2: _address2.text.trim(),
+          city: _city.text.trim(),
+          state: _state.text.trim(),
+          postalCode: _postal.text.trim(),
+          country: _country.text.trim().isEmpty ? 'US' : _country.text.trim(),
+          email: _email.text.trim(),
+          phone: _phone.text.trim(),
+          fax: _fax.text.trim(),
+          facebookUrl: _facebook.text.trim(),
+          instagramUrl: _instagram.text.trim(),
+          tiktokUrl: _tiktok.text.trim(),
+          xUrl: _x.text.trim(),
+          youtubeUrl: _youtube.text.trim(),
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Store info saved.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Store info save failed: $error')),
+      );
+    }
   }
 }
 
 class _TaxRulesSection extends StatefulWidget {
-  const _TaxRulesSection({required this.taxRules, required this.onSave});
+  const _TaxRulesSection({
+    required this.taxRules,
+    required this.onSave,
+    required this.onDelete,
+  });
 
   final List<TaxRule> taxRules;
-  final ValueChanged<TaxRule> onSave;
+  final AsyncValueChanged<TaxRule> onSave;
+  final AsyncValueChanged<TaxRule> onDelete;
 
   @override
   State<_TaxRulesSection> createState() => _TaxRulesSectionState();
@@ -7256,11 +7570,86 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
                             ),
                             DataCell(Text(rule.isEnabled ? 'Enabled' : 'Off')),
                             DataCell(
-                              IconButton(
-                                tooltip: 'Edit',
-                                onPressed: () =>
-                                    setState(() => _editing = rule),
-                                icon: const Icon(Icons.edit_outlined),
+                              Wrap(
+                                spacing: 4,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Edit',
+                                    onPressed: () =>
+                                        setState(() => _editing = rule),
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Delete',
+                                    onPressed: () async {
+                                      final confirmed =
+                                          await showDialog<bool>(
+                                            context: this.context,
+                                            builder: (dialogContext) => AlertDialog(
+                                              title: const Text(
+                                                'Delete tax rule?',
+                                              ),
+                                              content: Text(
+                                                'This will permanently delete "${rule.name}".',
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.of(
+                                                    dialogContext,
+                                                  ).pop(false),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                FilledButton(
+                                                  onPressed: () => Navigator.of(
+                                                    dialogContext,
+                                                  ).pop(true),
+                                                  child: const Text('Delete'),
+                                                ),
+                                              ],
+                                            ),
+                                          ) ??
+                                          false;
+                                      if (!confirmed) {
+                                        return;
+                                      }
+                                      try {
+                                        await widget.onDelete(rule);
+                                        if (_editing?.id == rule.id) {
+                                          setState(() => _editing = null);
+                                        }
+                                        if (!mounted) {
+                                          return;
+                                        }
+                                        ScaffoldMessenger.of(
+                                          this.context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Tax rule "${rule.name}" deleted.',
+                                            ),
+                                          ),
+                                        );
+                                      } catch (error) {
+                                        if (!mounted) {
+                                          return;
+                                        }
+                                        ScaffoldMessenger.of(
+                                          this.context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Tax rule delete failed: $error',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.redAccent,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -7274,9 +7663,10 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
             Expanded(
               flex: wide ? 4 : 0,
               child: _TaxRuleEditor(
+                key: ValueKey(_editing?.id ?? 'tax-editor-new'),
                 rule: _editing,
-                onSave: (rule) {
-                  widget.onSave(rule);
+                onSave: (rule) async {
+                  await widget.onSave(rule);
                   setState(() => _editing = null);
                 },
               ),
@@ -7289,10 +7679,10 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
 }
 
 class _TaxRuleEditor extends StatefulWidget {
-  const _TaxRuleEditor({required this.rule, required this.onSave});
+  const _TaxRuleEditor({super.key, required this.rule, required this.onSave});
 
   final TaxRule? rule;
-  final ValueChanged<TaxRule> onSave;
+  final AsyncValueChanged<TaxRule> onSave;
 
   @override
   State<_TaxRuleEditor> createState() => _TaxRuleEditorState();
@@ -7319,6 +7709,22 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
     super.initState();
     _enabled = widget.rule?.isEnabled ?? true;
     _vat = widget.rule?.isVat ?? false;
+  }
+
+  @override
+  void didUpdateWidget(covariant _TaxRuleEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.rule?.id != widget.rule?.id) {
+      _name.text = widget.rule?.name ?? 'New tax rule';
+      _state.text = widget.rule?.state ?? '';
+      _county.text = widget.rule?.county ?? '';
+      _city.text = widget.rule?.city ?? '';
+      _zip.text = widget.rule?.postalCodePrefix ?? '';
+      _rate.text = ((widget.rule?.rate ?? 0.082) * 100).toStringAsFixed(3);
+      _enabled = widget.rule?.isEnabled ?? true;
+      _vat = widget.rule?.isVat ?? false;
+      setState(() {});
+    }
   }
 
   @override
@@ -7392,24 +7798,35 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
     );
   }
 
-  void _save() {
-    widget.onSave(
-      TaxRule(
-        id: widget.rule?.id ?? 'tax-${DateTime.now().millisecondsSinceEpoch}',
-        name: _name.text.trim().isEmpty ? 'Tax rule' : _name.text.trim(),
-        state: _state.text.trim().toUpperCase(),
-        county: _county.text.trim(),
-        city: _city.text.trim(),
-        postalCodePrefix: _zip.text.trim(),
-        taxType: _vat ? 'vat' : 'sales',
-        rate: (double.tryParse(_rate.text) ?? 0) / 100,
-        isVat: _vat,
-        isEnabled: _enabled,
-      ),
-    );
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Tax rule saved.')));
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.onSave(
+        TaxRule(
+          id: widget.rule?.id ?? 'tax-${DateTime.now().millisecondsSinceEpoch}',
+          name: _name.text.trim().isEmpty ? 'Tax rule' : _name.text.trim(),
+          state: _state.text.trim().toUpperCase(),
+          county: _county.text.trim(),
+          city: _city.text.trim(),
+          postalCodePrefix: _zip.text.trim(),
+          taxType: _vat ? 'vat' : 'sales',
+          rate: (double.tryParse(_rate.text) ?? 0) / 100,
+          isVat: _vat,
+          isEnabled: _enabled,
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(const SnackBar(content: Text('Tax rule saved.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Tax rule save failed: $error')),
+      );
+    }
   }
 }
 
@@ -7421,7 +7838,7 @@ class _BackendUsersSection extends StatefulWidget {
   });
 
   final List<BackendUser> users;
-  final ValueChanged<BackendUser> onSave;
+  final AsyncValueChanged<BackendUser> onSave;
   final ValueChanged<String> onBlockIp;
 
   @override
@@ -7492,8 +7909,8 @@ class _BackendUsersSectionState extends State<_BackendUsersSection> {
                 user: _editing,
                 onNew: () => setState(() => _editing = null),
                 onBlockIp: widget.onBlockIp,
-                onSave: (user) {
-                  widget.onSave(user);
+                onSave: (user) async {
+                  await widget.onSave(user);
                   setState(() => _editing = null);
                 },
               ),
@@ -7517,7 +7934,7 @@ class BackendUserEditor extends StatefulWidget {
   final BackendUser? user;
   final VoidCallback onNew;
   final ValueChanged<String> onBlockIp;
-  final ValueChanged<BackendUser> onSave;
+  final AsyncValueChanged<BackendUser> onSave;
 
   @override
   State<BackendUserEditor> createState() => _BackendUserEditorState();
@@ -7825,6 +8242,20 @@ class _ReportsSection extends StatelessWidget {
         _DatabaseDownloadPanel(tables: _exportTables()),
         const SizedBox(height: 16),
         _TaxReportSummaryPanel(orders: orders),
+        const SizedBox(height: 16),
+        _SalesReportPanel(
+          orders: orders,
+          customers: customers,
+          dailyMetrics: dailyMetrics,
+        ),
+        const SizedBox(height: 16),
+        _RevenueReportPanel(
+          orders: orders,
+          products: products,
+          dailyMetrics: dailyMetrics,
+        ),
+        const SizedBox(height: 16),
+        _ExpenseReportPanel(orders: orders, products: products),
         const SizedBox(height: 16),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -8196,6 +8627,545 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
     return widget.orders
         .where((order) => (order.createdAt ?? DateTime(1970)).isAfter(cutoff))
         .toList();
+  }
+
+  DateTime? _cutoff() {
+    final now = DateTime.now();
+    return switch (_range) {
+      '7 days' => now.subtract(const Duration(days: 7)),
+      '30 days' => now.subtract(const Duration(days: 30)),
+      '90 days' => now.subtract(const Duration(days: 90)),
+      'This year' => DateTime(now.year),
+      _ => null,
+    };
+  }
+}
+
+class _SalesReportPanel extends StatefulWidget {
+  const _SalesReportPanel({
+    required this.orders,
+    required this.customers,
+    required this.dailyMetrics,
+  });
+
+  final List<Order> orders;
+  final List<CustomerAccount> customers;
+  final List<DailyMetric> dailyMetrics;
+
+  @override
+  State<_SalesReportPanel> createState() => _SalesReportPanelState();
+}
+
+class _SalesReportPanelState extends State<_SalesReportPanel> {
+  String _range = '30 days';
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredOrders = _filteredOrders();
+    final topCustomers = _topCustomersByOrders();
+    final avgOrderValue = filteredOrders.isEmpty
+        ? 0.0
+        : filteredOrders.fold<double>(0, (sum, order) => sum + order.total) /
+              filteredOrders.length;
+    final repeatCustomers = _repeatCustomerCount();
+    final newCustomers = filteredOrders.where((order) {
+      final customer = widget.customers
+          .cast<CustomerAccount?>()
+          .fold<CustomerAccount?>(
+            null,
+            (prev, c) => c != null && c.email == order.email ? c : prev,
+          );
+      return customer?.orders == 1;
+    }).length;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Sales Report',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _range,
+                    decoration: const InputDecoration(labelText: 'Period'),
+                    items: const [
+                      DropdownMenuItem(value: '7 days', child: Text('7 days')),
+                      DropdownMenuItem(
+                        value: '30 days',
+                        child: Text('30 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: '90 days',
+                        child: Text('90 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'This year',
+                        child: Text('This year'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _range = value ?? _range),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _MetricGrid(
+              metrics: [
+                _MetricData(
+                  Icons.shopping_cart_outlined,
+                  'Total orders',
+                  '${filteredOrders.length}',
+                ),
+                _MetricData(
+                  Icons.attach_money_outlined,
+                  'Avg order value',
+                  currency(avgOrderValue),
+                ),
+                _MetricData(
+                  Icons.people_alt_outlined,
+                  'Repeat customers',
+                  '$repeatCustomers',
+                ),
+                _MetricData(
+                  Icons.person_add_alt_outlined,
+                  'New customers',
+                  '$newCustomers',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Top customers by orders',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            for (final entry in topCustomers.take(5))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry['email'] as String,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text('${entry['orderCount']} orders'),
+                    Text(
+                      currency(entry['totalSpent'] as double),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Order> _filteredOrders() {
+    final cutoff = _cutoff();
+    if (cutoff == null) return List.of(widget.orders);
+    return widget.orders
+        .where((order) => (order.createdAt ?? DateTime(1970)).isAfter(cutoff))
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _topCustomersByOrders() {
+    final filtered = _filteredOrders();
+    final map = <String, Map<String, dynamic>>{};
+    for (final order in filtered) {
+      final email = order.email;
+      if (map.containsKey(email)) {
+        map[email]!['orderCount']++;
+        map[email]!['totalSpent'] += order.total;
+      } else {
+        map[email] = {
+          'email': email,
+          'orderCount': 1,
+          'totalSpent': order.total,
+        };
+      }
+    }
+    final sorted = map.values.toList()
+      ..sort(
+        (a, b) => (b['orderCount'] as int).compareTo(a['orderCount'] as int),
+      );
+    return sorted;
+  }
+
+  int _repeatCustomerCount() {
+    final emails = _filteredOrders().map((o) => o.email).toList();
+    final emailCounts = <String, int>{};
+    for (final email in emails) {
+      emailCounts[email] = (emailCounts[email] ?? 0) + 1;
+    }
+    return emailCounts.values.where((count) => count > 1).length;
+  }
+
+  DateTime? _cutoff() {
+    final now = DateTime.now();
+    return switch (_range) {
+      '7 days' => now.subtract(const Duration(days: 7)),
+      '30 days' => now.subtract(const Duration(days: 30)),
+      '90 days' => now.subtract(const Duration(days: 90)),
+      'This year' => DateTime(now.year),
+      _ => null,
+    };
+  }
+}
+
+class _RevenueReportPanel extends StatefulWidget {
+  const _RevenueReportPanel({
+    required this.orders,
+    required this.products,
+    required this.dailyMetrics,
+  });
+
+  final List<Order> orders;
+  final List<Fragrance> products;
+  final List<DailyMetric> dailyMetrics;
+
+  @override
+  State<_RevenueReportPanel> createState() => _RevenueReportPanelState();
+}
+
+class _RevenueReportPanelState extends State<_RevenueReportPanel> {
+  String _range = '30 days';
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredOrders = _filteredOrders();
+    final totalRevenue = filteredOrders.fold<double>(
+      0,
+      (sum, o) => sum + o.total,
+    );
+    final topProducts = _topProductsByRevenue();
+    final byStatus = _revenueByStatus();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Revenue Report',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _range,
+                    decoration: const InputDecoration(labelText: 'Period'),
+                    items: const [
+                      DropdownMenuItem(value: '7 days', child: Text('7 days')),
+                      DropdownMenuItem(
+                        value: '30 days',
+                        child: Text('30 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: '90 days',
+                        child: Text('90 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'This year',
+                        child: Text('This year'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _range = value ?? _range),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _MetricGrid(
+              metrics: [
+                _MetricData(
+                  Icons.attach_money_outlined,
+                  'Total revenue',
+                  currency(totalRevenue),
+                ),
+                _MetricData(
+                  Icons.trending_up_outlined,
+                  'Avg per order',
+                  currency(
+                    filteredOrders.isEmpty
+                        ? 0
+                        : totalRevenue / filteredOrders.length,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Revenue by status',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            for (final entry in byStatus.entries)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(entry.key),
+                    Text(
+                      currency(entry.value),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              'Top products by revenue',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            for (final entry in topProducts.take(5))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry['name'] as String,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text('${entry['quantity']} sold'),
+                    Text(
+                      currency(entry['revenue'] as double),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Order> _filteredOrders() {
+    final cutoff = _cutoff();
+    if (cutoff == null) return List.of(widget.orders);
+    return widget.orders
+        .where((order) => (order.createdAt ?? DateTime(1970)).isAfter(cutoff))
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _topProductsByRevenue() {
+    final filtered = _filteredOrders();
+    final map = <int, Map<String, dynamic>>{};
+    for (final order in filtered) {
+      for (final line in order.lines) {
+        final productId = line.product.id;
+        if (map.containsKey(productId)) {
+          map[productId]!['quantity'] += line.quantity;
+          map[productId]!['revenue'] += line.product.price * line.quantity;
+        } else {
+          map[productId] = {
+            'name': line.product.name,
+            'quantity': line.quantity,
+            'revenue': line.product.price * line.quantity,
+          };
+        }
+      }
+    }
+    final sorted = map.values.toList()
+      ..sort(
+        (a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double),
+      );
+    return sorted;
+  }
+
+  Map<String, double> _revenueByStatus() {
+    final filtered = _filteredOrders();
+    final map = <String, double>{};
+    for (final order in filtered) {
+      final status = order.status;
+      map[status] = (map[status] ?? 0) + order.total;
+    }
+    return map;
+  }
+
+  DateTime? _cutoff() {
+    final now = DateTime.now();
+    return switch (_range) {
+      '7 days' => now.subtract(const Duration(days: 7)),
+      '30 days' => now.subtract(const Duration(days: 30)),
+      '90 days' => now.subtract(const Duration(days: 90)),
+      'This year' => DateTime(now.year),
+      _ => null,
+    };
+  }
+}
+
+class _ExpenseReportPanel extends StatefulWidget {
+  const _ExpenseReportPanel({required this.orders, required this.products});
+
+  final List<Order> orders;
+  final List<Fragrance> products;
+
+  @override
+  State<_ExpenseReportPanel> createState() => _ExpenseReportPanelState();
+}
+
+class _ExpenseReportPanelState extends State<_ExpenseReportPanel> {
+  String _range = '30 days';
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredOrders = _filteredOrders();
+    final cogs = _costOfGoodsSold();
+    final estimatedShipping = _estimatedShippingCosts();
+    final totalExpense = cogs + estimatedShipping;
+    final totalRevenue = filteredOrders.fold<double>(
+      0,
+      (sum, o) => sum + o.total,
+    );
+    final grossMargin = totalRevenue - totalExpense;
+    final marginPercent = totalRevenue == 0
+        ? 0
+        : (grossMargin / totalRevenue) * 100;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Expense Report',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _range,
+                    decoration: const InputDecoration(labelText: 'Period'),
+                    items: const [
+                      DropdownMenuItem(value: '7 days', child: Text('7 days')),
+                      DropdownMenuItem(
+                        value: '30 days',
+                        child: Text('30 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: '90 days',
+                        child: Text('90 days'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'This year',
+                        child: Text('This year'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _range = value ?? _range),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _MetricGrid(
+              metrics: [
+                _MetricData(Icons.inventory_2_outlined, 'COGS', currency(cogs)),
+                _MetricData(
+                  Icons.local_shipping_outlined,
+                  'Est. shipping',
+                  currency(estimatedShipping),
+                ),
+                _MetricData(
+                  Icons.trending_down_outlined,
+                  'Total expenses',
+                  currency(totalExpense),
+                ),
+                _MetricData(
+                  Icons.savings_outlined,
+                  'Gross margin',
+                  '${marginPercent.toStringAsFixed(1)}%',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Card(
+              color: Colors.green.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Gross profit (Revenue - COGS - Shipping)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      currency(grossMargin),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Order> _filteredOrders() {
+    final cutoff = _cutoff();
+    if (cutoff == null) return List.of(widget.orders);
+    return widget.orders
+        .where((order) => (order.createdAt ?? DateTime(1970)).isAfter(cutoff))
+        .toList();
+  }
+
+  double _costOfGoodsSold() {
+    final filtered = _filteredOrders();
+    double total = 0;
+    for (final order in filtered) {
+      for (final line in order.lines) {
+        total += line.product.cost * line.quantity;
+      }
+    }
+    return total;
+  }
+
+  double _estimatedShippingCosts() {
+    final filtered = _filteredOrders();
+    double total = 0;
+    for (final order in filtered) {
+      total += order.shippingTotal;
+    }
+    return total;
   }
 
   DateTime? _cutoff() {
@@ -8821,6 +9791,10 @@ class _ProductEditorState extends State<ProductEditor> {
   late final TextEditingController _name;
   late final TextEditingController _brand;
   late final TextEditingController _description;
+  late final TextEditingController _vibe;
+  late final TextEditingController _performance;
+  late final TextEditingController _comparison;
+  late final TextEditingController _fragranceProfile;
   late final TextEditingController _ingredients;
   late final TextEditingController _size;
   late final TextEditingController _price;
@@ -8850,62 +9824,6 @@ class _ProductEditorState extends State<ProductEditor> {
   late Set<String> _seasons;
   late Set<String> _occasions;
 
-  static const _fallbackNoteOptions = [
-    'Bergamot',
-    'Mandarin',
-    'Lavender',
-    'Rose',
-    'Jasmine',
-    'Iris',
-    'Sandalwood',
-    'Vetiver',
-    'Amber',
-    'Musk',
-    'Oud',
-    'Vanilla',
-    'Orange blossom',
-    'Patchouli',
-    'Cedarwood',
-    'Tonka bean',
-    'Leather',
-    'Fig',
-    'Saffron',
-    'Oakmoss',
-  ];
-  static const _fallbackFamilyOptions = [
-    'Amber',
-    'Aromatic',
-    'Chypre',
-    'Citrus',
-    'Earthy wood',
-    'Floral',
-    'Gourmand',
-    'Green fruity',
-    'Resinous wood',
-    'Soft / skin',
-    'Spice',
-    'White floral',
-    'Woody',
-  ];
-  static const _fallbackSeasonOptions = [
-    'Year-round',
-    'Warm weather',
-    'Cool weather',
-    'Spring',
-    'Summer',
-    'Fall',
-    'Winter',
-  ];
-  static const _fallbackOccasionOptions = [
-    'Daily wear',
-    'Office',
-    'Evening',
-    'Date night',
-    'Formal',
-    'Gifts',
-    'Vacation',
-    'Layering',
-  ];
   static const _typeOptions = ['Perfume', 'Cologne', 'Body Oil'];
   static const _concentrationOptions = [
     'EDT',
@@ -8922,6 +9840,12 @@ class _ProductEditorState extends State<ProductEditor> {
     _name = TextEditingController(text: widget.product.name);
     _brand = TextEditingController(text: widget.product.brand);
     _description = TextEditingController(text: widget.product.description);
+    _vibe = TextEditingController(text: widget.product.vibe);
+    _performance = TextEditingController(text: widget.product.performance);
+    _comparison = TextEditingController(text: widget.product.comparison);
+    _fragranceProfile = TextEditingController(
+      text: widget.product.fragranceProfile,
+    );
     _ingredients = TextEditingController(text: widget.product.ingredients);
     _size = TextEditingController(text: widget.product.size);
     _price = TextEditingController(
@@ -8992,6 +9916,10 @@ class _ProductEditorState extends State<ProductEditor> {
     _name.dispose();
     _brand.dispose();
     _description.dispose();
+    _vibe.dispose();
+    _performance.dispose();
+    _comparison.dispose();
+    _fragranceProfile.dispose();
     _ingredients.dispose();
     _size.dispose();
     _price.dispose();
@@ -9015,10 +9943,8 @@ class _ProductEditorState extends State<ProductEditor> {
     final primaryVariant = activeVariants.isEmpty
         ? ProductVariant(
             id: DateTime.now().millisecondsSinceEpoch,
-            size: _size.text.trim().isEmpty ? '50 ml' : _size.text.trim(),
-            sku: _sku.text.trim().isEmpty
-                ? 'EA-${widget.product.id}'
-                : _sku.text.trim(),
+            size: _size.text.trim(),
+            sku: _sku.text.trim(),
             price: double.tryParse(_price.text) ?? 0,
             stock: int.tryParse(_stock.text) ?? 0,
             reorderPoint: int.tryParse(_reorderPoint.text) ?? 8,
@@ -9026,41 +9952,37 @@ class _ProductEditorState extends State<ProductEditor> {
         : activeVariants.first;
     final product = Fragrance(
       id: widget.product.id,
-      name: _name.text.trim().isEmpty
-          ? 'Untitled fragrance'
-          : _name.text.trim(),
+      name: _name.text.trim(),
       type: _type,
-      brand: _brand.text.trim().isEmpty ? 'Egbe Anom' : _brand.text.trim(),
+      brand: _brand.text.trim(),
       notes: _joinValues(_generalNotes),
-      size: primaryVariant.size.trim().isEmpty
-          ? '50 ml'
-          : primaryVariant.size.trim(),
+      size: primaryVariant.size.trim(),
       price: primaryVariant.price,
       cost: double.tryParse(_cost.text) ?? 0,
       stock: activeVariants.fold(0, (total, variant) => total + variant.stock),
       sold: widget.product.sold,
       featuredColor: widget.product.featuredColor,
-      sku: primaryVariant.sku.trim().isEmpty
-          ? 'EA-${widget.product.id}'
-          : primaryVariant.sku.trim(),
+      sku: primaryVariant.sku.trim(),
       photoUrl: widget.product.photoUrl,
-      vendor: _vendor.text.trim().isEmpty ? 'Egbe Anom' : _vendor.text.trim(),
+      vendor: _vendor.text.trim(),
       categoryId: _categoryId,
       brandId: widget.product.brandId,
-      itemLocation: _itemLocation.text.trim().isEmpty
-          ? 'Main warehouse'
-          : _itemLocation.text.trim(),
+      itemLocation: _itemLocation.text.trim(),
       reorderPoint: primaryVariant.reorderPoint,
       description: _description.text.trim(),
+      vibe: _vibe.text.trim(),
+      performance: _performance.text.trim(),
+      comparison: _comparison.text.trim(),
+      fragranceProfile: _fragranceProfile.text.trim(),
       ingredients: _ingredients.text.trim(),
       topNotes: _joinValues(_topNotes),
       heartNotes: _joinValues(_heartNotes),
       baseNotes: _joinValues(_baseNotes),
       concentration: _concentration,
       gender: _gender,
-      season: _seasons.isEmpty ? 'Year-round' : _joinValues(_seasons),
-      occasion: _occasions.isEmpty ? 'Daily wear' : _joinValues(_occasions),
-      family: _families.isEmpty ? 'Woody' : _joinValues(_families),
+      season: _joinValues(_seasons),
+      occasion: _joinValues(_occasions),
+      family: _joinValues(_families),
       rating: widget.product.rating,
       reviewCount: widget.product.reviewCount,
       weightOz: _storedWeight(
@@ -9106,28 +10028,18 @@ class _ProductEditorState extends State<ProductEditor> {
   String get _lengthLabel => _metric ? 'Length (cm)' : 'Length (in)';
   String get _widthLabel => _metric ? 'Width (cm)' : 'Width (in)';
   String get _heightLabel => _metric ? 'Height (cm)' : 'Height (in)';
-  List<String> get _noteOptions => _mergedOptions(
-    widget.noteOptions.isEmpty ? _fallbackNoteOptions : widget.noteOptions,
-    [_generalNotes, _topNotes, _heartNotes, _baseNotes],
-  );
-  List<String> get _familyOptions => _mergedOptions(
-    widget.familyOptions.isEmpty
-        ? _fallbackFamilyOptions
-        : widget.familyOptions,
-    [_families],
-  );
-  List<String> get _seasonOptions => _mergedOptions(
-    widget.seasonOptions.isEmpty
-        ? _fallbackSeasonOptions
-        : widget.seasonOptions,
-    [_seasons],
-  );
-  List<String> get _occasionOptions => _mergedOptions(
-    widget.occasionOptions.isEmpty
-        ? _fallbackOccasionOptions
-        : widget.occasionOptions,
-    [_occasions],
-  );
+  List<String> get _noteOptions => _mergedOptions(widget.noteOptions, [
+    _generalNotes,
+    _topNotes,
+    _heartNotes,
+    _baseNotes,
+  ]);
+  List<String> get _familyOptions =>
+      _mergedOptions(widget.familyOptions, [_families]);
+  List<String> get _seasonOptions =>
+      _mergedOptions(widget.seasonOptions, [_seasons]);
+  List<String> get _occasionOptions =>
+      _mergedOptions(widget.occasionOptions, [_occasions]);
   double _displayWeight(double oz) => _metric ? oz * 28.3495 : oz;
   double _displayLength(double inches) => _metric ? inches * 2.54 : inches;
   double _storedWeight(double value) => _metric ? value / 28.3495 : value;
@@ -9317,6 +10229,34 @@ class _ProductEditorState extends State<ProductEditor> {
             TextField(
               controller: _description,
               decoration: const InputDecoration(labelText: 'Description'),
+              minLines: 2,
+              maxLines: 3,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _vibe,
+              decoration: const InputDecoration(labelText: 'Vibe'),
+              minLines: 2,
+              maxLines: 3,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _performance,
+              decoration: const InputDecoration(labelText: 'Performance'),
+              minLines: 2,
+              maxLines: 3,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _comparison,
+              decoration: const InputDecoration(labelText: 'Comparison'),
+              minLines: 2,
+              maxLines: 3,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _fragranceProfile,
+              decoration: const InputDecoration(labelText: 'Fragrance profile'),
               minLines: 2,
               maxLines: 3,
             ),
@@ -9821,10 +10761,15 @@ class _VariantTable extends StatelessWidget {
 }
 
 class _OrderFulfillmentEditor extends StatefulWidget {
-  const _OrderFulfillmentEditor({required this.order, required this.onSave});
+  const _OrderFulfillmentEditor({
+    required this.order,
+    required this.onSave,
+    required this.onCreateShippingLabel,
+  });
 
   final Order order;
-  final ValueChanged<Order> onSave;
+  final AsyncValueChanged<Order> onSave;
+  final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
 
   @override
   State<_OrderFulfillmentEditor> createState() =>
@@ -9837,6 +10782,7 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
   late String _carrier;
   late String _service;
   late String _labelStatus;
+  bool _creatingLabel = false;
 
   @override
   void initState() {
@@ -9952,12 +10898,55 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: () => setState(() {
-                  _labelStatus = 'Label created';
-                  _status = 'Label created';
-                }),
+                onPressed: _creatingLabel
+                    ? null
+                    : () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (_carrier != 'USPS') {
+                          setState(() {
+                            _labelStatus = 'Label created';
+                            _status = 'Label created';
+                          });
+                          return;
+                        }
+                        setState(() => _creatingLabel = true);
+                        try {
+                          final label = await widget.onCreateShippingLabel(
+                            widget.order,
+                          );
+                          if (!mounted) {
+                            return;
+                          }
+                          setState(() {
+                            _tracking.text = label.trackingNumber;
+                            _labelStatus = label.labelStatus;
+                            _status = 'Label created';
+                            _service = widget.order.shippingService.isEmpty
+                                ? _service
+                                : widget.order.shippingService;
+                          });
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'USPS label created for ${label.trackingNumber}.',
+                              ),
+                            ),
+                          );
+                        } catch (error) {
+                          if (!mounted) {
+                            return;
+                          }
+                          messenger.showSnackBar(
+                            SnackBar(content: Text('$error')),
+                          );
+                        } finally {
+                          if (mounted) {
+                            setState(() => _creatingLabel = false);
+                          }
+                        }
+                      },
                 icon: const Icon(Icons.local_shipping_outlined),
-                label: const Text('Create label'),
+                label: Text(_creatingLabel ? 'Creating label' : 'Create label'),
               ),
             ),
             const SizedBox(width: 10),

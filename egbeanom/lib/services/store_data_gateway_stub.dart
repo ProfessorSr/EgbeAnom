@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:egbeanom/services/shipping_rate_gateway.dart';
+
 class StoreDataGateway {
   const StoreDataGateway();
 
@@ -21,6 +23,10 @@ class StoreDataGateway {
   Future<List<Map<String, dynamic>>> fetchNotifications() async => [];
   Future<Map<String, dynamic>?> fetchSiteStatus() async => null;
   Future<Map<String, dynamic>?> fetchEmailServerSettings() async => null;
+  Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() async => null;
+  Future<Map<String, dynamic>?> fetchShippingCarrierCredentialsForCarrier(
+    String carrier,
+  ) async => null;
   Future<Map<String, dynamic>?> fetchStoreInfo() async => null;
   Future<List<Map<String, dynamic>>> fetchBackendUsers() async => [];
 
@@ -33,7 +39,9 @@ class StoreDataGateway {
   Future<Map<String, dynamic>?> upsertCategory(
     Map<String, dynamic> category,
   ) async => category;
-  Future<void> upsertCouponRule(Map<String, dynamic> coupon) async {}
+  Future<Map<String, dynamic>?> upsertCouponRule(
+    Map<String, dynamic> coupon,
+  ) async => coupon;
   Future<void> upsertFragranceNote(Map<String, dynamic> note) async {}
   Future<void> upsertPaymentMethod(Map<String, dynamic> method) async {}
   Future<void> upsertContentBlock(Map<String, dynamic> block) async {}
@@ -42,6 +50,7 @@ class StoreDataGateway {
   Future<void> deleteShippingOption(String optionId) async {}
   Future<void> upsertStoreInfo(Map<String, dynamic> info) async {}
   Future<void> upsertTaxRule(Map<String, dynamic> rule) async {}
+  Future<void> deleteTaxRule(String ruleId) async {}
   Future<void> insertOrderItems(List<Map<String, dynamic>> items) async {}
   Future<void> upsertReview(Map<String, dynamic> review) async {}
   Future<void> updateReviewStatus(String reviewId, String status) async {}
@@ -67,7 +76,38 @@ class StoreDataGateway {
   Future<void> upsertBlockedIp(Map<String, dynamic> blockedIp) async {}
   Future<void> upsertSiteStatus(Map<String, dynamic> value) async {}
   Future<void> upsertEmailServerSettings(Map<String, dynamic> value) async {}
+  Future<void> upsertShippingCarrierCredentials(
+    Map<String, dynamic> value,
+  ) async {}
+  Future<void> upsertShippingCarrierCredentialsForCarrier(
+    String carrier,
+    Map<String, dynamic> value,
+  ) async {}
+
+  Future<Map<String, dynamic>?> fetchPaymentProcessorCredentials(
+    String provider,
+  ) async => null;
+
+  Future<void> upsertPaymentProcessorCredentials(
+    String provider,
+    Map<String, dynamic> value,
+  ) async {}
+
   Future<void> upsertBackendUser(Map<String, dynamic> user) async {}
+  Future<List<ShippingRateQuote>> quoteShippingRates(
+    ShippingRateRequest request,
+  ) async => const [];
+  Future<ShippingLabelResult> createUspsLabel({
+    required Map<String, dynamic> order,
+    required Map<String, dynamic> storeInfo,
+    required Map<String, dynamic> package,
+  }) async => const ShippingLabelResult(
+    trackingNumber: '',
+    labelStatus: 'Not requested',
+    labelFileName: 'usps-label.pdf',
+    labelContentType: 'application/pdf',
+    labelBase64: '',
+  );
 
   Future<String> uploadProductImageBytes({
     required int productId,

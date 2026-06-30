@@ -15,6 +15,7 @@ void main() {
     });
 
     await tester.pumpWidget(const EgbeAnomStoreApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('Shop'), findsOneWidget);
     expect(find.text('Cart'), findsOneWidget);
@@ -27,7 +28,7 @@ void main() {
     await tester.tap(find.text('Admin sign in'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Admin sign in'), findsOneWidget);
+    expect(find.text('Admin portal'), findsOneWidget);
     expect(find.text('Marketplace admin'), findsNothing);
   });
 }

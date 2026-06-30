@@ -51,22 +51,26 @@ class Fragrance {
     this.reorderPoint = 8,
     this.isActive = true,
     this.description = '',
+    this.vibe = '',
+    this.performance = '',
+    this.comparison = '',
+    this.fragranceProfile = '',
     this.ingredients = '',
     this.topNotes = '',
     this.heartNotes = '',
     this.baseNotes = '',
-    this.concentration = 'EDP',
-    this.gender = 'Unisex',
-    this.season = 'Year-round',
-    this.occasion = 'Daily wear',
-    this.family = 'Woody',
-    this.rating = 4.7,
+    this.concentration = '',
+    this.gender = '',
+    this.season = '',
+    this.occasion = '',
+    this.family = '',
+    this.rating = 0,
     this.reviewCount = 0,
     this.weightOz = 8,
     this.lengthIn = 6,
     this.widthIn = 3,
     this.heightIn = 3,
-    this.itemLocation = 'Main warehouse',
+    this.itemLocation = '',
     List<ProductImage>? images,
     List<ProductVariant>? variants,
   }) : images = images ?? [],
@@ -91,6 +95,10 @@ class Fragrance {
   int reorderPoint;
   bool isActive;
   String description;
+  String vibe;
+  String performance;
+  String comparison;
+  String fragranceProfile;
   String ingredients;
   String topNotes;
   String heartNotes;
@@ -156,9 +164,9 @@ class Fragrance {
       id: _asInt(row['id']),
       name: _asString(row['name']),
       type: _asString(row['fragrance_type']),
-      brand: _asString(row['brand'], fallback: 'Egbe Anom'),
+      brand: _asString(row['brand']),
       notes: _asString(row['notes']),
-      size: _asString(row['size'], fallback: '50 ml'),
+      size: _asString(row['size']),
       price: _asDouble(row['price']),
       cost: _asDouble(row['cost']),
       stock: _asInt(row['stock']),
@@ -168,20 +176,17 @@ class Fragrance {
       ),
       sku: _asString(row['sku']),
       photoUrl: _asString(row['photo_url']),
-      vendor: _asString(row['vendor'], fallback: 'Egbe Anom'),
+      vendor: _asString(row['vendor']),
       categoryId: _asInt(row['category_id']),
       brandId: row['brand_id'] == null ? null : _asInt(row['brand_id']),
       reorderPoint: _asInt(row['reorder_point'], fallback: 8),
       isActive: row['is_active'] != false,
-      description: _asString(
-        row['description'],
-        fallback:
-            'A polished fragrance crafted for a memorable first impression and a refined dry-down.',
-      ),
-      ingredients: _asString(
-        row['ingredients'],
-        fallback: 'Alcohol denat., parfum/fragrance, aqua/water, aroma notes.',
-      ),
+      description: _asString(row['description']),
+      vibe: _asString(row['vibe']),
+      performance: _asString(row['performance']),
+      comparison: _asString(row['comparison']),
+      fragranceProfile: _asString(row['fragrance_profile']),
+      ingredients: _asString(row['ingredients']),
       topNotes: _asString(row['top_notes'], fallback: _asString(row['notes'])),
       heartNotes: _asString(
         row['heart_notes'],
@@ -191,18 +196,18 @@ class Fragrance {
         row['base_notes'],
         fallback: _asString(row['notes']),
       ),
-      concentration: _asString(row['concentration'], fallback: 'EDP'),
-      gender: _asString(row['gender'], fallback: 'Unisex'),
-      season: _asString(row['season'], fallback: 'Year-round'),
-      occasion: _asString(row['occasion'], fallback: 'Daily wear'),
-      family: _asString(row['family'], fallback: 'Woody'),
-      rating: _asDouble(row['rating'], fallback: 4.7),
-      reviewCount: _asInt(row['review_count'], fallback: 18),
+      concentration: _asString(row['concentration']),
+      gender: _asString(row['gender']),
+      season: _asString(row['season']),
+      occasion: _asString(row['occasion']),
+      family: _asString(row['family']),
+      rating: _asDouble(row['rating']),
+      reviewCount: _asInt(row['review_count']),
       weightOz: _asDouble(row['weight_oz'], fallback: 8),
       lengthIn: _asDouble(row['length_in'], fallback: 6),
       widthIn: _asDouble(row['width_in'], fallback: 3),
       heightIn: _asDouble(row['height_in'], fallback: 3),
-      itemLocation: _asString(row['item_location'], fallback: 'Main warehouse'),
+      itemLocation: _asString(row['item_location']),
       images: parsedImages,
       variants: parsedVariants,
     );
@@ -654,6 +659,70 @@ class CartLine {
   double get total => unitPrice * quantity;
 }
 
+class ShippingAddress {
+  ShippingAddress({
+    this.firstName = '',
+    this.lastName = '',
+    this.addressLine1 = '',
+    this.addressLine2 = '',
+    this.city = '',
+    this.state = '',
+    this.postalCode = '',
+    this.country = 'US',
+    this.phone = '',
+    this.email = '',
+  });
+
+  String firstName;
+  String lastName;
+  String addressLine1;
+  String addressLine2;
+  String city;
+  String state;
+  String postalCode;
+  String country;
+  String phone;
+  String email;
+
+  bool get isComplete =>
+      addressLine1.trim().isNotEmpty &&
+      city.trim().isNotEmpty &&
+      state.trim().isNotEmpty &&
+      postalCode.trim().isNotEmpty;
+
+  factory ShippingAddress.fromJson(Object? value) {
+    if (value is Map) {
+      final data = value.cast<Object?, Object?>();
+      return ShippingAddress(
+        firstName: _asString(data['first_name']),
+        lastName: _asString(data['last_name']),
+        addressLine1: _asString(data['address_line1']),
+        addressLine2: _asString(data['address_line2']),
+        city: _asString(data['city']),
+        state: _asString(data['state']),
+        postalCode: _asString(data['postal_code']),
+        country: _asString(data['country'], fallback: 'US'),
+        phone: _asString(data['phone']),
+        email: _asString(data['email']),
+      );
+    }
+    return ShippingAddress();
+  }
+
+  Map<String, dynamic> toJson() => {
+    'first_name': firstName,
+    'last_name': lastName,
+    'address_line1': addressLine1,
+    'address_line2': addressLine2,
+    'city': city,
+    'state': state,
+    'postal_code': postalCode,
+    'country': country,
+    'phone': phone,
+    'email': email,
+  };
+}
+
 class Order {
   Order({
     required this.id,
@@ -670,9 +739,11 @@ class Order {
     this.shippingTotal = 0,
     this.trackingNumber = '',
     this.labelStatus = 'Not requested',
+    ShippingAddress? shippingAddress,
     this.createdAt,
     List<CartLine>? lines,
-  }) : lines = lines ?? [];
+  }) : shippingAddress = shippingAddress ?? ShippingAddress(),
+       lines = lines ?? [];
 
   final String id;
   String customer;
@@ -688,6 +759,7 @@ class Order {
   double shippingTotal;
   String trackingNumber;
   String labelStatus;
+  ShippingAddress shippingAddress;
   DateTime? createdAt;
   final List<CartLine> lines;
 
@@ -702,16 +774,16 @@ class Order {
             id: _asInt(data['product_id']),
             name: _asString(data['product_name'], fallback: 'Order item'),
             type: 'Fragrance',
-            brand: 'Egbe Anom',
+            brand: '',
             notes: '',
-            size: _asString(data['size'], fallback: '50 ml'),
+            size: _asString(data['size']),
             price: _asDouble(data['unit_price']),
             stock: 0,
             sold: 0,
             featuredColor: const Color(0xFFC88F52),
             sku: _asString(data['sku']),
             photoUrl: _asString(data['product_photo_url']),
-            vendor: 'Egbe Anom',
+            vendor: '',
             categoryId: 1,
             itemLocation: _asString(data['item_location']),
           );
@@ -726,7 +798,7 @@ class Order {
     }
     return Order(
       id: _asString(row['order_number'], fallback: _asString(row['id'])),
-      customer: _asString(row['customer_name'], fallback: 'Online customer'),
+      customer: _asString(row['customer_name']),
       email: _asString(row['email']),
       total: _asDouble(row['grand_total']),
       itemCount: _asInt(row['item_count'], fallback: 1),
@@ -745,6 +817,7 @@ class Order {
       shippingTotal: _asDouble(row['shipping_total']),
       trackingNumber: _asString(row['tracking_number']),
       labelStatus: _asString(row['label_status'], fallback: 'Not requested'),
+      shippingAddress: ShippingAddress.fromJson(row['shipping_address']),
       createdAt: DateTime.tryParse(_asString(row['created_at'])),
       lines: parsedLines,
     );
@@ -1200,6 +1273,7 @@ class PaymentMethodConfig {
     this.mode = 'Test',
     this.publicKey = '',
     this.merchantId = '',
+    this.apiSecret = '',
     this.webhookUrl = '',
     this.statementDescriptor = '',
   });
@@ -1213,6 +1287,7 @@ class PaymentMethodConfig {
   String mode;
   String publicKey;
   String merchantId;
+  String apiSecret;
   String webhookUrl;
   String statementDescriptor;
 
@@ -1227,6 +1302,7 @@ class PaymentMethodConfig {
       mode: _asString(row['mode'], fallback: 'Test'),
       publicKey: _asString(row['public_key']),
       merchantId: _asString(row['merchant_id']),
+      apiSecret: _asString(row['api_secret']),
       webhookUrl: _asString(row['webhook_url']),
       statementDescriptor: _asString(
         row['statement_descriptor'],
