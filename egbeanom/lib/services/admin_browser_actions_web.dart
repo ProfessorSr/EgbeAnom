@@ -25,9 +25,7 @@ void downloadBase64File({
   required String base64Contents,
   required String mimeType,
 }) {
-  final blob = html.Blob([
-    base64Decode(base64Contents),
-  ], mimeType);
+  final blob = html.Blob([base64Decode(base64Contents)], mimeType);
   final url = html.Url.createObjectUrlFromBlob(blob);
   final anchor = html.AnchorElement(href: url)
     ..download = fileName
@@ -54,6 +52,10 @@ void printHtmlDocument(String title, String htmlContents) {
   body > *:not(#egbeanom-print-root) { display: none !important; }
   #egbeanom-print-root {
     display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
     font-family: Arial, sans-serif;
     color: #111;
     margin: 24px;
@@ -77,11 +79,31 @@ void printHtmlDocument(String title, String htmlContents) {
 ''';
   final root = html.DivElement()
     ..id = 'egbeanom-print-root'
-    ..style.display = 'none'
+    ..style.position = 'fixed'
+    ..style.left = '-10000px'
+    ..style.top = '0'
+    ..style.width = '1100px'
     ..setInnerHtml(htmlContents, treeSanitizer: html.NodeTreeSanitizer.trusted);
   html.document.title = title;
   html.document.head?.append(style);
   html.document.body?.append(root);
+  unawaited(_printAfterImagesLoad(root, style));
+}
+
+Future<void> _printAfterImagesLoad(
+  html.DivElement root,
+  html.StyleElement style,
+) async {
+  final images = root.querySelectorAll('img').whereType<html.ImageElement>();
+  await Future.wait([
+    for (final image in images)
+      if (image.complete != true)
+        Future.any([
+          image.onLoad.first,
+          image.onError.first,
+          Future<void>.delayed(const Duration(seconds: 2)),
+        ]),
+  ]);
   html.window.print();
   Future<void>.delayed(const Duration(seconds: 1), () {
     root.remove();

@@ -713,24 +713,28 @@ class _AdminOverviewState extends State<_AdminOverview> {
         ),
         const SizedBox(height: 12),
         Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Performance summary',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Revenue is ${currency(_revenueInWindow)} from $_ordersInWindow orders, with ${widget.conversionRate.toStringAsFixed(1)}% conversion and ${currency(_averageOrderValue)} average order value.',
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Acquisition added $_usersInWindow users and generated $_visitsInWindow visits (${currency(_revenuePerVisit)} revenue per visit).',
-                ),
-              ],
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => widget.onOpenSection(AdminSection.reports),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Performance summary',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Revenue is ${currency(_revenueInWindow)} from $_ordersInWindow orders, with ${widget.conversionRate.toStringAsFixed(1)}% conversion and ${currency(_averageOrderValue)} average order value.',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Acquisition added $_usersInWindow users and generated $_visitsInWindow visits (${currency(_revenuePerVisit)} revenue per visit).',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -748,43 +752,52 @@ class _AdminOverviewState extends State<_AdminOverview> {
               Icons.payments_outlined,
               'Revenue ($_windowDays days)',
               currency(_revenueInWindow),
+              targetSection: AdminSection.reports,
             ),
             _MetricData(
               Icons.receipt_long_outlined,
               'Orders ($_windowDays days)',
               '$_ordersInWindow',
+              targetSection: AdminSection.orders,
             ),
             _MetricData(
               Icons.analytics_outlined,
               'Avg order value',
               currency(_averageOrderValue),
+              targetSection: AdminSection.reports,
             ),
             _MetricData(
               Icons.swap_vert_circle_outlined,
               'Revenue per visit',
               currency(_revenuePerVisit),
+              targetSection: AdminSection.analytics,
             ),
             _MetricData(
               Icons.person_add_alt,
               'New users today',
               '${widget.newUsersToday}',
+              targetSection: AdminSection.customers,
             ),
             _MetricData(
               Icons.groups_outlined,
               'New users ($_windowDays days)',
               '$_usersInWindow',
+              targetSection: AdminSection.customers,
             ),
             _MetricData(
               Icons.trending_up,
               'Conversion',
               '${widget.conversionRate.toStringAsFixed(1)}%',
+              targetSection: AdminSection.analytics,
             ),
             _MetricData(
               Icons.visibility_outlined,
               'Visits ($_windowDays days)',
               '$_visitsInWindow',
+              targetSection: AdminSection.analytics,
             ),
           ],
+          onOpenSection: widget.onOpenSection,
         ),
         const SizedBox(height: 18),
         Text(
@@ -827,7 +840,10 @@ class _AdminOverviewState extends State<_AdminOverview> {
               children: [
                 Expanded(
                   flex: wide ? 6 : 0,
-                  child: _DailyTrendPanel(metrics: _windowMetrics),
+                  child: _DailyTrendPanel(
+                    metrics: _windowMetrics,
+                    onTap: () => widget.onOpenSection(AdminSection.reports),
+                  ),
                 ),
                 if (wide)
                   const SizedBox(width: 16)
@@ -851,11 +867,12 @@ class _AdminOverviewState extends State<_AdminOverview> {
 }
 
 class _MetricData {
-  const _MetricData(this.icon, this.label, this.value);
+  const _MetricData(this.icon, this.label, this.value, {this.targetSection});
 
   final IconData icon;
   final String label;
   final String value;
+  final AdminSection? targetSection;
 }
 
 class _RangeSelect extends StatelessWidget {
@@ -901,10 +918,15 @@ class _RangeSelect extends StatelessWidget {
 }
 
 class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({required this.metrics, this.tall = false});
+  const _MetricGrid({
+    required this.metrics,
+    this.tall = false,
+    this.onOpenSection,
+  });
 
   final List<_MetricData> metrics;
   final bool tall;
+  final ValueChanged<AdminSection>? onOpenSection;
 
   @override
   Widget build(BuildContext context) {
@@ -930,6 +952,9 @@ class _MetricGrid extends StatelessWidget {
                 icon: metric.icon,
                 label: metric.label,
                 value: metric.value,
+                onTap: metric.targetSection == null || onOpenSection == null
+                    ? null
+                    : () => onOpenSection!(metric.targetSection!),
               ),
           ],
         );
@@ -1141,36 +1166,41 @@ class _CommerceDashboardPanels extends StatelessWidget {
                 Expanded(
                   flex: wide ? 7 : 0,
                   child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Top selling products',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 10),
-                          for (final product in topProducts.take(5))
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: SizedBox.square(
-                                dimension: 42,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: ProductPhoto(product: product),
-                                ),
-                              ),
-                              title: Text(product.name),
-                              subtitle: Text(
-                                '${product.sold} sold • ${product.stock} on hand',
-                              ),
-                              trailing: Text(
-                                currency(product.sold * product.price),
-                              ),
-                              onTap: () => onOpenSection(AdminSection.catalog),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => onOpenSection(AdminSection.catalog),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Top selling products',
+                              style: Theme.of(context).textTheme.titleLarge,
                             ),
-                        ],
+                            const SizedBox(height: 10),
+                            for (final product in topProducts.take(5))
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: SizedBox.square(
+                                  dimension: 42,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: ProductPhoto(product: product),
+                                  ),
+                                ),
+                                title: Text(product.name),
+                                subtitle: Text(
+                                  '${product.sold} sold • ${product.stock} on hand',
+                                ),
+                                trailing: Text(
+                                  currency(product.sold * product.price),
+                                ),
+                                onTap: () =>
+                                    onOpenSection(AdminSection.catalog),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1194,41 +1224,45 @@ class _CommerceDashboardPanels extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Fulfillment snapshot',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 10),
-                              _MiniDashboardRow(
-                                label: 'Active carts',
-                                value: '${activeCarts.length}',
-                              ),
-                              _MiniDashboardRow(
-                                label: 'Reserved units',
-                                value:
-                                    '${activeCarts.fold(0, (sum, cart) => sum + cart.itemCount)}',
-                              ),
-                              _MiniDashboardRow(
-                                label: 'Reserved value',
-                                value: currency(
-                                  activeCarts.fold(
-                                    0,
-                                    (sum, cart) => sum + cart.value,
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => onOpenSection(AdminSection.carts),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Fulfillment snapshot',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 10),
+                                _MiniDashboardRow(
+                                  label: 'Active carts',
+                                  value: '${activeCarts.length}',
+                                ),
+                                _MiniDashboardRow(
+                                  label: 'Reserved units',
+                                  value:
+                                      '${activeCarts.fold(0, (sum, cart) => sum + cart.itemCount)}',
+                                ),
+                                _MiniDashboardRow(
+                                  label: 'Reserved value',
+                                  value: currency(
+                                    activeCarts.fold(
+                                      0,
+                                      (sum, cart) => sum + cart.value,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              TextButton.icon(
-                                onPressed: () =>
-                                    onOpenSection(AdminSection.carts),
-                                icon: const Icon(Icons.open_in_new),
-                                label: const Text('Open carts'),
-                              ),
-                            ],
+                                TextButton.icon(
+                                  onPressed: () =>
+                                      onOpenSection(AdminSection.carts),
+                                  icon: const Icon(Icons.open_in_new),
+                                  label: const Text('Open carts'),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -2494,11 +2528,13 @@ class _PromotionsSectionState extends State<_PromotionsSection> {
                                   DataCell(Text(coupon.name)),
                                   DataCell(Text(coupon.type)),
                                   DataCell(
-                                    Text(
-                                      coupon.type == 'Percent'
-                                          ? '${coupon.value.toStringAsFixed(0)}%'
-                                          : currency(coupon.value),
-                                    ),
+                                    Text(switch (coupon.type) {
+                                      'Percent' =>
+                                        '${coupon.value.toStringAsFixed(0)}%',
+                                      'Buy X get Y' =>
+                                        'Buy ${coupon.buyQuantity}, get ${coupon.getQuantity} @ ${currency(coupon.getPrice)}',
+                                      _ => currency(coupon.value),
+                                    }),
                                   ),
                                   DataCell(Text(currency(coupon.minimumSpend))),
                                   DataCell(
@@ -2583,6 +2619,9 @@ class _PromotionsSectionState extends State<_PromotionsSection> {
           used: coupon.used,
           starts: coupon.starts,
           ends: coupon.ends,
+          buyQuantity: coupon.buyQuantity,
+          getQuantity: coupon.getQuantity,
+          getPrice: coupon.getPrice,
           isActive: archived ? false : coupon.isActive,
           isArchived: archived,
         ),
@@ -2635,6 +2674,9 @@ class _CouponEditorState extends State<CouponEditor> {
   late TextEditingController _value;
   late TextEditingController _minimumSpend;
   late TextEditingController _usageLimit;
+  late TextEditingController _buyQuantity;
+  late TextEditingController _getQuantity;
+  late TextEditingController _getPrice;
   late String _type;
   bool _active = true;
   bool _saving = false;
@@ -2664,6 +2706,13 @@ class _CouponEditorState extends State<CouponEditor> {
     _usageLimit = TextEditingController(
       text: '${widget.coupon?.usageLimit ?? 100}',
     );
+    _buyQuantity = TextEditingController(
+      text: '${widget.coupon?.buyQuantity ?? 1}',
+    );
+    _getQuantity = TextEditingController(
+      text: '${widget.coupon?.getQuantity ?? 1}',
+    );
+    _getPrice = TextEditingController(text: '${widget.coupon?.getPrice ?? 0}');
     _type = widget.coupon?.type ?? 'Percent';
     _active = widget.coupon?.isActive ?? true;
   }
@@ -2674,6 +2723,9 @@ class _CouponEditorState extends State<CouponEditor> {
     _value.dispose();
     _minimumSpend.dispose();
     _usageLimit.dispose();
+    _buyQuantity.dispose();
+    _getQuantity.dispose();
+    _getPrice.dispose();
   }
 
   @override
@@ -2731,7 +2783,11 @@ class _CouponEditorState extends State<CouponEditor> {
                 Expanded(
                   child: TextField(
                     controller: _value,
-                    decoration: const InputDecoration(labelText: 'Value'),
+                    decoration: InputDecoration(
+                      labelText: _type == 'Buy X get Y'
+                          ? 'Legacy value'
+                          : 'Value',
+                    ),
                     keyboardType: TextInputType.number,
                   ),
                 ),
@@ -2747,6 +2803,38 @@ class _CouponEditorState extends State<CouponEditor> {
                 ),
               ],
             ),
+            if (_type == 'Buy X get Y') ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _buyQuantity,
+                      decoration: const InputDecoration(labelText: 'Buy qty'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _getQuantity,
+                      decoration: const InputDecoration(labelText: 'Get qty'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _getPrice,
+                      decoration: const InputDecoration(
+                        labelText: 'Get item price',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 10),
             TextField(
               controller: _usageLimit,
@@ -2805,6 +2893,9 @@ class _CouponEditorState extends State<CouponEditor> {
           used: widget.coupon?.used ?? 0,
           starts: widget.coupon?.starts ?? '2026-06-01',
           ends: widget.coupon?.ends ?? '2026-12-31',
+          buyQuantity: int.tryParse(_buyQuantity.text) ?? 0,
+          getQuantity: int.tryParse(_getQuantity.text) ?? 0,
+          getPrice: double.tryParse(_getPrice.text) ?? 0,
           isActive: _active,
           isArchived: widget.coupon?.isArchived ?? false,
         ),
@@ -3222,7 +3313,8 @@ class _ShippingSectionState extends State<_ShippingSection> {
     final enabledCarriers = _carriers
         .where((carrier) => _carrierOptions(carrier).any((o) => o.isEnabled))
         .length;
-    final flatRate = _flatRateOption;
+    final flatPerOrder = _flatRatePerOrderOption;
+    final flatPerItem = _flatRatePerItemOption;
     final selectedMethods = _carrierMethods(_selectedCarrier);
     final selectedOptions = _carrierOptions(_selectedCarrier);
     return Column(
@@ -3250,19 +3342,43 @@ class _ShippingSectionState extends State<_ShippingSection> {
         ),
         const SizedBox(height: 16),
         _FlatRateShippingCard(
-          option: flatRate,
+          option: flatPerOrder,
+          title: 'Flat rate per order',
+          subtitle: 'Charge one flat shipping price for the full order.',
           onSave: widget.onSave,
           onDisable: () => widget.onSave(
             ShippingOption(
-              id: flatRate.id,
-              name: flatRate.name,
-              carrier: flatRate.carrier,
-              service: flatRate.service,
-              priority: flatRate.priority,
-              price: flatRate.price,
-              estimatedDays: flatRate.estimatedDays,
+              id: flatPerOrder.id,
+              name: flatPerOrder.name,
+              carrier: flatPerOrder.carrier,
+              service: flatPerOrder.service,
+              priority: flatPerOrder.priority,
+              price: flatPerOrder.price,
+              chargeType: flatPerOrder.chargeType,
+              estimatedDays: flatPerOrder.estimatedDays,
               isEnabled: false,
-              sortOrder: flatRate.sortOrder,
+              sortOrder: flatPerOrder.sortOrder,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _FlatRateShippingCard(
+          option: flatPerItem,
+          title: 'Flat rate per item',
+          subtitle: 'Charge the flat shipping price once for each item.',
+          onSave: widget.onSave,
+          onDisable: () => widget.onSave(
+            ShippingOption(
+              id: flatPerItem.id,
+              name: flatPerItem.name,
+              carrier: flatPerItem.carrier,
+              service: flatPerItem.service,
+              priority: flatPerItem.priority,
+              price: flatPerItem.price,
+              chargeType: flatPerItem.chargeType,
+              estimatedDays: flatPerItem.estimatedDays,
+              isEnabled: false,
+              sortOrder: flatPerItem.sortOrder,
             ),
           ),
         ),
@@ -3463,16 +3579,18 @@ class _ShippingSectionState extends State<_ShippingSection> {
 
   static const List<String> _carriers = ['FedEx', 'UPS', 'USPS', 'DHL'];
 
-  ShippingOption get _flatRateOption {
+  ShippingOption get _flatRatePerOrderOption {
     return widget.options.firstWhere(
-      _isFlatRate,
+      (option) =>
+          option.id == 'ship-flat-rate-order' || option.id == 'ship-flat-rate',
       orElse: () => ShippingOption(
-        id: 'ship-flat-rate',
-        name: 'Flat rate shipping',
+        id: 'ship-flat-rate-order',
+        name: 'Flat rate per order',
         carrier: 'Flat Rate',
-        service: 'Storewide shipping',
+        service: 'Per order',
         priority: 'Standard',
         price: 7.95,
+        chargeType: 'per_order',
         estimatedDays: '3-5 business days',
         isEnabled: false,
         sortOrder: 5,
@@ -3480,9 +3598,29 @@ class _ShippingSectionState extends State<_ShippingSection> {
     );
   }
 
+  ShippingOption get _flatRatePerItemOption {
+    return widget.options.firstWhere(
+      (option) => option.id == 'ship-flat-rate-item',
+      orElse: () => ShippingOption(
+        id: 'ship-flat-rate-item',
+        name: 'Flat rate per item',
+        carrier: 'Flat Rate',
+        service: 'Per item',
+        priority: 'Standard',
+        price: 2.95,
+        chargeType: 'per_item',
+        estimatedDays: '3-5 business days',
+        isEnabled: false,
+        sortOrder: 6,
+      ),
+    );
+  }
+
   bool _isFlatRate(ShippingOption option) =>
       option.carrier.trim().toLowerCase() == 'flat rate' ||
-      option.id == 'ship-flat-rate';
+      option.id == 'ship-flat-rate' ||
+      option.id == 'ship-flat-rate-order' ||
+      option.id == 'ship-flat-rate-item';
 
   List<ShippingOption> _carrierOptions(String carrier) => widget.options
       .where((option) => _sameCarrier(option.carrier, carrier))
@@ -3515,6 +3653,7 @@ class _ShippingSectionState extends State<_ShippingSection> {
         service: method.service,
         priority: method.priority,
         price: method.price,
+        chargeType: option.chargeType,
         estimatedDays: method.estimatedDays,
         isEnabled: enabled,
         sortOrder: option.sortOrder,
@@ -3675,11 +3814,15 @@ class _CarrierShippingMethod {
 class _FlatRateShippingCard extends StatefulWidget {
   const _FlatRateShippingCard({
     required this.option,
+    required this.title,
+    required this.subtitle,
     required this.onSave,
     required this.onDisable,
   });
 
   final ShippingOption option;
+  final String title;
+  final String subtitle;
   final AsyncValueChanged<ShippingOption> onSave;
   final VoidCallback onDisable;
 
@@ -3760,12 +3903,10 @@ class _FlatRateShippingCardState extends State<_FlatRateShippingCard> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(
-                    'Flat rate shipping',
+                    widget.title,
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  subtitle: const Text(
-                    'Use one storewide shipping price regardless of carrier.',
-                  ),
+                  subtitle: Text(widget.subtitle),
                   value: widget.option.isEnabled,
                   onChanged: (value) {
                     if (value) {
@@ -3798,11 +3939,16 @@ class _FlatRateShippingCardState extends State<_FlatRateShippingCard> {
     widget.onSave(
       ShippingOption(
         id: widget.option.id,
-        name: 'Flat rate shipping',
+        name: widget.option.chargeType == 'per_item'
+            ? 'Flat rate per item'
+            : 'Flat rate per order',
         carrier: 'Flat Rate',
-        service: 'Storewide shipping',
+        service: widget.option.chargeType == 'per_item'
+            ? 'Per item'
+            : 'Per order',
         priority: 'Standard',
         price: double.tryParse(_price.text) ?? 0,
+        chargeType: widget.option.chargeType,
         estimatedDays: _days.text.trim().isEmpty
             ? '3-5 business days'
             : _days.text.trim(),
@@ -4654,7 +4800,7 @@ class _CustomersSection extends StatefulWidget {
 
 class _CustomersSectionState extends State<_CustomersSection> {
   String _query = '';
-  String _sortBy = 'Name';
+  String _sortBy = 'Newest';
   CustomerAccount? _selected;
 
   List<CustomerAccount> get _visibleCustomers {
@@ -5169,9 +5315,6 @@ class _OrdersSectionState extends State<_OrdersSection> {
               .compareTo(
                 methodRank['${b.shippingCarrier} ${b.shippingService}'] ?? 999,
               ),
-        'Delivery days' => _shippingDaysForOrder(
-          a,
-        ).compareTo(_shippingDaysForOrder(b)),
         'Shipping priority' => a.shippingPriority.compareTo(b.shippingPriority),
         'Newest' => (b.createdAt ?? DateTime(2000)).compareTo(
           a.createdAt ?? DateTime(2000),
@@ -5187,17 +5330,6 @@ class _OrdersSectionState extends State<_OrdersSection> {
   List<Order> get _selectedOrders => widget.orders
       .where((order) => _selectedOrderIds.contains(order.id))
       .toList();
-
-  int _shippingDaysForOrder(Order order) {
-    final method = '${order.shippingCarrier} ${order.shippingService}';
-    for (final option in widget.shippingOptions) {
-      if ('${option.carrier} ${option.service}' == method) {
-        final match = RegExp(r'\d+').firstMatch(option.estimatedDays);
-        return int.tryParse(match?.group(0) ?? '') ?? 99;
-      }
-    }
-    return 99;
-  }
 
   void _toggleAll(bool? selected) {
     setState(() {
@@ -5463,10 +5595,6 @@ class _OrdersSectionState extends State<_OrdersSection> {
                           DropdownMenuItem(
                             value: 'Shipping method',
                             child: Text('Shipping method'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Delivery days',
-                            child: Text('Delivery days'),
                           ),
                           DropdownMenuItem(
                             value: 'Newest',
@@ -5963,14 +6091,7 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
     final monthly = _salesByMonth(reportOrders);
     final taxCollected = reportOrders.fold(
       0.0,
-      (sum, order) =>
-          sum +
-          math.max(
-            0,
-            order.total -
-                order.shippingTotal -
-                order.lines.fold(0.0, (lineSum, line) => lineSum + line.total),
-          ),
+      (sum, order) => sum + _orderTaxTotal(order),
     );
     final averageOrder = salesOrders.isEmpty
         ? 0.0
@@ -7264,6 +7385,7 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
     text: widget.storeInfo.addressLine2,
   );
   late final _city = TextEditingController(text: widget.storeInfo.city);
+  late final _county = TextEditingController(text: widget.storeInfo.county);
   late final _state = TextEditingController(text: widget.storeInfo.state);
   late final _postal = TextEditingController(text: widget.storeInfo.postalCode);
   late final _country = TextEditingController(text: widget.storeInfo.country);
@@ -7292,6 +7414,7 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
       _address1,
       _address2,
       _city,
+      _county,
       _state,
       _postal,
       _country,
@@ -7367,6 +7490,10 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
               TextField(
                 controller: _city,
                 decoration: const InputDecoration(labelText: 'City'),
+              ),
+              TextField(
+                controller: _county,
+                decoration: const InputDecoration(labelText: 'County'),
               ),
               TextField(
                 controller: _state,
@@ -7482,6 +7609,7 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
           addressLine1: _address1.text.trim(),
           addressLine2: _address2.text.trim(),
           city: _city.text.trim(),
+          county: _county.text.trim(),
           state: _state.text.trim(),
           postalCode: _postal.text.trim(),
           country: _country.text.trim().isEmpty ? 'US' : _country.text.trim(),
@@ -8381,6 +8509,9 @@ class _ReportsSection extends StatelessWidget {
             'minimum_spend': coupon.minimumSpend,
             'usage_limit': coupon.usageLimit,
             'used': coupon.used,
+            'buy_quantity': coupon.buyQuantity,
+            'get_quantity': coupon.getQuantity,
+            'get_price': coupon.getPrice,
             'starts': coupon.starts,
             'ends': coupon.ends,
             'is_active': coupon.isActive,
@@ -8515,17 +8646,7 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
       (sum, order) => sum + order.shippingTotal,
     );
     final total = orders.fold(0.0, (sum, order) => sum + order.total);
-    final tax = orders.fold(
-      0.0,
-      (sum, order) =>
-          sum +
-          math.max(
-            0,
-            order.total -
-                order.shippingTotal -
-                order.lines.fold(0.0, (lineSum, line) => lineSum + line.total),
-          ),
-    );
+    final tax = orders.fold(0.0, (sum, order) => sum + _orderTaxTotal(order));
     final cost = orders.fold(
       0.0,
       (sum, order) =>
@@ -9344,9 +9465,10 @@ class _DatabaseDownloadPanelState extends State<_DatabaseDownloadPanel> {
 }
 
 class _DailyTrendPanel extends StatelessWidget {
-  const _DailyTrendPanel({required this.metrics});
+  const _DailyTrendPanel({required this.metrics, this.onTap});
 
   final List<DailyMetric> metrics;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -9354,50 +9476,52 @@ class _DailyTrendPanel extends StatelessWidget {
       return metric.revenue > max ? metric.revenue : max;
     });
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Daily marketplace performance',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
-            for (final metric in metrics)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    SizedBox(width: 42, child: Text(metric.day)),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(5),
-                        child: LinearProgressIndicator(
-                          minHeight: 12,
-                          value: maxRevenue == 0
-                              ? 0
-                              : metric.revenue / maxRevenue,
-                          backgroundColor: const Color(0xFFE8E1D6),
-                          color: const Color(0xFFC88F52),
-                        ),
+    final content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Daily marketplace performance',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 14),
+          for (final metric in metrics)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  SizedBox(width: 42, child: Text(metric.day)),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: LinearProgressIndicator(
+                        minHeight: 12,
+                        value: maxRevenue == 0
+                            ? 0
+                            : metric.revenue / maxRevenue,
+                        backgroundColor: const Color(0xFFE8E1D6),
+                        color: const Color(0xFFC88F52),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 190,
-                      child: Text(
-                        '${currency(metric.revenue)} • ${metric.newUsers} new • ${metric.orders} orders',
-                        textAlign: TextAlign.right,
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 190,
+                    child: Text(
+                      '${currency(metric.revenue)} • ${metric.newUsers} new • ${metric.orders} orders',
+                      textAlign: TextAlign.right,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-          ],
-        ),
+            ),
+        ],
       ),
+    );
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
@@ -9448,45 +9572,53 @@ class _MetricCard extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 20, color: const Color(0xFFC88F52)),
-                const SizedBox(width: 8),
-                Expanded(child: Text(label)),
+    final content = Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: const Color(0xFFC88F52)),
+              const SizedBox(width: 8),
+              Expanded(child: Text(label)),
+              if (onTap != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.open_in_new, size: 16),
+              ],
+            ],
+          ),
+          Text(value, style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 26,
+            child: _SparklineChart(
+              values: [
+                label.length.toDouble(),
+                value.length.toDouble() + 2,
+                icon.codePoint % 11 + 4,
+                (label.codeUnitAt(0) % 13) + 3,
+                value.codeUnitAt(0) % 15 + 5,
               ],
             ),
-            Text(value, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 26,
-              child: _SparklineChart(
-                values: [
-                  label.length.toDouble(),
-                  value.length.toDouble() + 2,
-                  icon.codePoint % 11 + 4,
-                  (label.codeUnitAt(0) % 13) + 3,
-                  value.codeUnitAt(0) % 15 + 5,
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+    return Card(
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
@@ -9741,15 +9873,105 @@ class _InventoryTableState extends State<_InventoryTable> {
   }
 
   void _printInventory(List<Fragrance> products) {
-    final contents = [
-      'Egbe Anom inventory',
-      'Filter: $_stockFilter',
-      'Generated: ${DateTime.now()}',
-      '',
-      for (final product in products)
-        '${product.sku} | ${product.name} | ${product.brand} | location ${product.itemLocation} | stock ${product.stock} | reserved ${_reservedFor(product)} | reorder ${product.reorderPoint} | ${product.shippingSize(widget.measurementSystem)}',
-    ].join('\n');
-    printTextDocument('Egbe Anom inventory', contents);
+    final rows = products.map((product) {
+      final reserved = _reservedFor(product);
+      final available = product.stock - reserved;
+      final photoUrl = _printImageSource(product.primaryPhotoUrl);
+      final photo = photoUrl.isEmpty
+          ? ''
+          : '<img src="${htmlEscape.convert(photoUrl)}" alt="${htmlEscape.convert(product.name)}">';
+      return '''
+        <tr>
+          <td class="photo">$photo</td>
+          <td>${htmlEscape.convert(product.name)}</td>
+          <td>${htmlEscape.convert(product.sku)}</td>
+          <td>${htmlEscape.convert(product.type)}</td>
+          <td>${htmlEscape.convert(currency(product.price))}</td>
+          <td>${product.stock}</td>
+          <td>${htmlEscape.convert(product.itemLocation)}</td>
+          <td>$reserved</td>
+          <td>$available</td>
+          <td>${product.reorderPoint}</td>
+          <td>${htmlEscape.convert(product.shippingSize(widget.measurementSystem))}</td>
+          <td>${product.sold}</td>
+        </tr>
+      ''';
+    }).join();
+    final html =
+        '''
+      <style>
+        .inventory-print h1 {
+          font-size: 22px;
+          margin: 0 0 6px;
+        }
+        .inventory-print .meta {
+          font-size: 12px;
+          margin: 0 0 14px;
+        }
+        .inventory-print table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 11px;
+        }
+        .inventory-print th,
+        .inventory-print td {
+          border: 1px solid #111;
+          padding: 6px 7px;
+          text-align: left;
+          vertical-align: middle;
+        }
+        .inventory-print th {
+          background: #f1ede6;
+          font-weight: 700;
+        }
+        .inventory-print .photo {
+          width: 48px;
+          text-align: center;
+        }
+        .inventory-print img {
+          width: 38px;
+          height: 38px;
+          object-fit: cover;
+        }
+      </style>
+      <div class="inventory-print">
+        <h1>Egbe Anom inventory</h1>
+        <p class="meta">Filter: ${htmlEscape.convert(_stockFilter)} &nbsp; Generated: ${htmlEscape.convert(DateTime.now().toString())}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Photo</th>
+              <th>Item</th>
+              <th>SKU</th>
+              <th>Type</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th>Location</th>
+              <th>In carts</th>
+              <th>Available</th>
+              <th>Reorder</th>
+              <th>Ship size</th>
+              <th>Sold</th>
+            </tr>
+          </thead>
+          <tbody>
+            $rows
+          </tbody>
+        </table>
+      </div>
+    ''';
+    printHtmlDocument('Egbe Anom inventory', html);
+  }
+
+  String _printImageSource(String source) {
+    final clean = source.trim();
+    if (clean.isEmpty) {
+      return '';
+    }
+    if (clean.startsWith('assets/')) {
+      return Uri.encodeFull('assets/$clean');
+    }
+    return Uri.encodeFull(clean);
   }
 }
 

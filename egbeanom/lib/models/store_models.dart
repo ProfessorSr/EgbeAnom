@@ -435,6 +435,7 @@ class StoreInfo {
     this.addressLine1 = '',
     this.addressLine2 = '',
     this.city = '',
+    this.county = '',
     this.state = '',
     this.postalCode = '',
     this.country = 'US',
@@ -455,6 +456,7 @@ class StoreInfo {
   String addressLine1;
   String addressLine2;
   String city;
+  String county;
   String state;
   String postalCode;
   String country;
@@ -479,6 +481,7 @@ class StoreInfo {
       addressLine1: _asString(row['address_line1']),
       addressLine2: _asString(row['address_line2']),
       city: _asString(row['city']),
+      county: _asString(row['county']),
       state: _asString(row['state']),
       postalCode: _asString(row['postal_code']),
       country: _asString(row['country'], fallback: 'US'),
@@ -502,6 +505,7 @@ class StoreInfo {
     'address_line1': addressLine1,
     'address_line2': addressLine2,
     'city': city,
+    'county': county,
     'state': state,
     'postal_code': postalCode,
     'country': country,
@@ -575,6 +579,36 @@ class TaxRule {
     'is_vat': isVat,
     'is_enabled': isEnabled,
     'sort_order': sortOrder,
+  };
+}
+
+class TaxBreakdownLine {
+  const TaxBreakdownLine({
+    required this.name,
+    required this.jurisdiction,
+    required this.rate,
+    required this.amount,
+  });
+
+  final String name;
+  final String jurisdiction;
+  final double rate;
+  final double amount;
+
+  factory TaxBreakdownLine.fromRow(Map<String, dynamic> row) {
+    return TaxBreakdownLine(
+      name: _asString(row['name']),
+      jurisdiction: _asString(row['jurisdiction']),
+      rate: _asDouble(row['rate']),
+      amount: _asDouble(row['amount']),
+    );
+  }
+
+  Map<String, dynamic> toRow() => {
+    'name': name,
+    'jurisdiction': jurisdiction,
+    'rate': rate,
+    'amount': amount,
   };
 }
 
@@ -666,6 +700,7 @@ class ShippingAddress {
     this.addressLine1 = '',
     this.addressLine2 = '',
     this.city = '',
+    this.county = '',
     this.state = '',
     this.postalCode = '',
     this.country = 'US',
@@ -678,6 +713,7 @@ class ShippingAddress {
   String addressLine1;
   String addressLine2;
   String city;
+  String county;
   String state;
   String postalCode;
   String country;
@@ -699,6 +735,7 @@ class ShippingAddress {
         addressLine1: _asString(data['address_line1']),
         addressLine2: _asString(data['address_line2']),
         city: _asString(data['city']),
+        county: _asString(data['county']),
         state: _asString(data['state']),
         postalCode: _asString(data['postal_code']),
         country: _asString(data['country'], fallback: 'US'),
@@ -715,6 +752,7 @@ class ShippingAddress {
     'address_line1': addressLine1,
     'address_line2': addressLine2,
     'city': city,
+    'county': county,
     'state': state,
     'postal_code': postalCode,
     'country': country,
@@ -737,6 +775,10 @@ class Order {
     this.shippingService = '',
     this.shippingPriority = 'Standard',
     this.shippingTotal = 0,
+    this.subtotal = 0,
+    this.discountTotal = 0,
+    this.couponCode = '',
+    this.taxBreakdown = const [],
     this.trackingNumber = '',
     this.labelStatus = 'Not requested',
     ShippingAddress? shippingAddress,
@@ -757,6 +799,10 @@ class Order {
   String shippingService;
   String shippingPriority;
   double shippingTotal;
+  double subtotal;
+  double discountTotal;
+  String couponCode;
+  List<TaxBreakdownLine> taxBreakdown;
   String trackingNumber;
   String labelStatus;
   ShippingAddress shippingAddress;
@@ -796,6 +842,17 @@ class Order {
         }
       }
     }
+    final taxRows = row['tax_breakdown'];
+    final taxBreakdown = <TaxBreakdownLine>[];
+    if (taxRows is List) {
+      for (final taxRow in taxRows) {
+        if (taxRow is Map) {
+          taxBreakdown.add(
+            TaxBreakdownLine.fromRow(taxRow.cast<String, dynamic>()),
+          );
+        }
+      }
+    }
     return Order(
       id: _asString(row['order_number'], fallback: _asString(row['id'])),
       customer: _asString(row['customer_name']),
@@ -815,6 +872,10 @@ class Order {
         fallback: 'Standard',
       ),
       shippingTotal: _asDouble(row['shipping_total']),
+      subtotal: _asDouble(row['subtotal']),
+      discountTotal: _asDouble(row['discount_total']),
+      couponCode: _asString(row['coupon_code']),
+      taxBreakdown: taxBreakdown,
       trackingNumber: _asString(row['tracking_number']),
       labelStatus: _asString(row['label_status'], fallback: 'Not requested'),
       shippingAddress: ShippingAddress.fromJson(row['shipping_address']),
@@ -832,6 +893,7 @@ class ShippingOption {
     required this.service,
     required this.priority,
     required this.price,
+    this.chargeType = 'per_order',
     this.estimatedDays = '3-5 business days',
     this.isEnabled = true,
     this.sortOrder = 10,
@@ -843,6 +905,7 @@ class ShippingOption {
   String service;
   String priority;
   double price;
+  String chargeType;
   String estimatedDays;
   bool isEnabled;
   int sortOrder;
@@ -855,6 +918,7 @@ class ShippingOption {
       service: _asString(row['service']),
       priority: _asString(row['priority'], fallback: 'Standard'),
       price: _asDouble(row['price']),
+      chargeType: _asString(row['charge_type'], fallback: 'per_order'),
       estimatedDays: _asString(
         row['estimated_days'],
         fallback: '3-5 business days',
@@ -871,6 +935,7 @@ class ShippingOption {
     'service': service,
     'priority': priority,
     'price': price,
+    'charge_type': chargeType,
     'estimated_days': estimatedDays,
     'is_enabled': isEnabled,
     'sort_order': sortOrder,
@@ -1229,6 +1294,9 @@ class CouponRule {
     required this.used,
     required this.starts,
     required this.ends,
+    this.buyQuantity = 0,
+    this.getQuantity = 0,
+    this.getPrice = 0,
     this.isActive = true,
     this.isArchived = false,
   });
@@ -1242,6 +1310,9 @@ class CouponRule {
   int used;
   String starts;
   String ends;
+  int buyQuantity;
+  int getQuantity;
+  double getPrice;
   bool isActive;
   bool isArchived;
 
@@ -1256,6 +1327,9 @@ class CouponRule {
       used: _asInt(row['used']),
       starts: _asString(row['starts_on']),
       ends: _asString(row['ends_on']),
+      buyQuantity: _asInt(row['buy_quantity']),
+      getQuantity: _asInt(row['get_quantity']),
+      getPrice: _asDouble(row['get_price']),
       isActive: row['is_active'] != false,
       isArchived: row['is_archived'] == true,
     );

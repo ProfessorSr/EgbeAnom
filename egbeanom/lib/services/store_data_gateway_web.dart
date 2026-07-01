@@ -218,8 +218,41 @@ class StoreDataGateway {
 
   Future<void> upsertFragranceNote(Map<String, dynamic> note) =>
       _upsert('fragrance_notes', note);
-  Future<void> upsertPaymentMethod(Map<String, dynamic> method) =>
-      _upsert('payment_methods', method);
+  Future<void> upsertPaymentMethod(Map<String, dynamic> method) async {
+    final row = Map<String, dynamic>.from(method)..remove('id');
+    final provider = '${row['provider'] ?? ''}'.trim();
+    final name = '${row['name'] ?? ''}'.trim();
+    if (provider.isEmpty || name.isEmpty) {
+      throw StateError('Payment method requires a provider and name.');
+    }
+    final existing = await _rest(
+      'payment_methods',
+      query: {
+        'select': 'id',
+        'provider': 'eq.$provider',
+        'name': 'eq.$name',
+        'limit': '1',
+      },
+    );
+    final rows = _rows(existing);
+    if (rows.isEmpty) {
+      await _rest(
+        'payment_methods',
+        method: 'POST',
+        body: row,
+        returnRepresentation: false,
+      );
+      return;
+    }
+    await _rest(
+      'payment_methods',
+      method: 'PATCH',
+      query: {'id': 'eq.${rows.first['id']}'},
+      body: row,
+      returnRepresentation: false,
+    );
+  }
+
   Future<void> upsertContentBlock(Map<String, dynamic> block) =>
       _upsert('content_blocks', block);
   Future<void> upsertOrder(Map<String, dynamic> order) =>

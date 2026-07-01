@@ -199,15 +199,23 @@ class CheckoutView extends StatelessWidget {
     super.key,
     required this.lines,
     required this.subtotal,
+    required this.discount,
+    required this.taxBreakdown,
     required this.tax,
     required this.shipping,
     required this.total,
+    required this.promoCode,
+    required this.appliedCouponCode,
+    required this.promoMessage,
     required this.checkoutEmail,
     required this.checkoutPhone,
     required this.shippingAddress,
     required this.onCheckoutEmailChanged,
     required this.onCheckoutPhoneChanged,
     required this.onShippingAddressChanged,
+    required this.onPromoCodeChanged,
+    required this.onApplyPromoCode,
+    required this.onRemovePromoCode,
     required this.shippingOptions,
     required this.selectedShippingOptionId,
     required this.onShippingOptionChanged,
@@ -218,15 +226,23 @@ class CheckoutView extends StatelessWidget {
 
   final List<CartLine> lines;
   final double subtotal;
+  final double discount;
+  final List<TaxBreakdownLine> taxBreakdown;
   final double tax;
   final double shipping;
   final double total;
+  final String promoCode;
+  final String appliedCouponCode;
+  final String promoMessage;
   final String checkoutEmail;
   final String checkoutPhone;
   final ShippingAddress shippingAddress;
   final ValueChanged<String> onCheckoutEmailChanged;
   final ValueChanged<String> onCheckoutPhoneChanged;
   final ValueChanged<ShippingAddress> onShippingAddressChanged;
+  final ValueChanged<String> onPromoCodeChanged;
+  final VoidCallback onApplyPromoCode;
+  final VoidCallback onRemovePromoCode;
   final List<ShippingOption> shippingOptions;
   final String selectedShippingOptionId;
   final ValueChanged<String> onShippingOptionChanged;
@@ -306,6 +322,8 @@ class CheckoutView extends StatelessWidget {
                                     trailing: Text(
                                       option.price == 0
                                           ? 'Free'
+                                          : option.chargeType == 'per_item'
+                                          ? '${currency(option.price)} / item'
                                           : currency(option.price),
                                     ),
                                   ),
@@ -338,9 +356,17 @@ class CheckoutView extends StatelessWidget {
                       child: CheckoutReviewPanel(
                         lines: lines,
                         subtotal: subtotal,
+                        discount: discount,
+                        taxBreakdown: taxBreakdown,
                         tax: tax,
                         shipping: shipping,
                         total: total,
+                        promoCode: promoCode,
+                        appliedCouponCode: appliedCouponCode,
+                        promoMessage: promoMessage,
+                        onPromoCodeChanged: onPromoCodeChanged,
+                        onApplyPromoCode: onApplyPromoCode,
+                        onRemovePromoCode: onRemovePromoCode,
                         onPlaceOrder: onPlaceOrder,
                       ),
                     ),
@@ -444,6 +470,7 @@ class _AddressFields extends StatelessWidget {
       String? addressLine1,
       String? addressLine2,
       String? city,
+      String? county,
       String? state,
       String? postalCode,
     }) {
@@ -454,6 +481,7 @@ class _AddressFields extends StatelessWidget {
           addressLine1: addressLine1 ?? address.addressLine1,
           addressLine2: addressLine2 ?? address.addressLine2,
           city: city ?? address.city,
+          county: county ?? address.county,
           state: state ?? address.state,
           postalCode: postalCode ?? address.postalCode,
           country: address.country,
@@ -521,6 +549,17 @@ class _AddressFields extends StatelessWidget {
                     offset: address.city.length,
                   ),
                 onChanged: (value) => updateAddress(city: value),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                decoration: decoration('County'),
+                controller: TextEditingController(text: address.county)
+                  ..selection = TextSelection.collapsed(
+                    offset: address.county.length,
+                  ),
+                onChanged: (value) => updateAddress(county: value),
               ),
             ),
             const SizedBox(width: 10),
@@ -778,17 +817,33 @@ class CheckoutReviewPanel extends StatelessWidget {
     super.key,
     required this.lines,
     required this.subtotal,
+    required this.discount,
+    required this.taxBreakdown,
     required this.tax,
     required this.shipping,
     required this.total,
+    required this.promoCode,
+    required this.appliedCouponCode,
+    required this.promoMessage,
+    required this.onPromoCodeChanged,
+    required this.onApplyPromoCode,
+    required this.onRemovePromoCode,
     required this.onPlaceOrder,
   });
 
   final List<CartLine> lines;
   final double subtotal;
+  final double discount;
+  final List<TaxBreakdownLine> taxBreakdown;
   final double tax;
   final double shipping;
   final double total;
+  final String promoCode;
+  final String appliedCouponCode;
+  final String promoMessage;
+  final ValueChanged<String> onPromoCodeChanged;
+  final VoidCallback onApplyPromoCode;
+  final VoidCallback onRemovePromoCode;
   final VoidCallback onPlaceOrder;
 
   @override
@@ -824,8 +879,44 @@ class CheckoutReviewPanel extends StatelessWidget {
                 ),
               ),
             const Divider(height: 24),
+            _PromoCodeField(
+              code: promoCode,
+              appliedCouponCode: appliedCouponCode,
+              onChanged: onPromoCodeChanged,
+              onApply: onApplyPromoCode,
+              onRemove: onRemovePromoCode,
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: onApplyPromoCode,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Apply code'),
+            ),
+            if (promoMessage.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                promoMessage,
+                style: TextStyle(
+                  color: appliedCouponCode.isEmpty
+                      ? Theme.of(context).colorScheme.error
+                      : const Color(0xFF27724E),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+            const Divider(height: 24),
             _PriceRow(label: 'Subtotal', value: subtotal),
-            _PriceRow(label: 'Estimated tax', value: tax),
+            if (discount > 0) _PriceRow(label: 'Discount', value: -discount),
+            if (taxBreakdown.isEmpty)
+              _PriceRow(label: 'Estimated tax', value: tax)
+            else ...[
+              for (final line in taxBreakdown)
+                _PriceRow(
+                  label:
+                      '${line.jurisdiction} tax (${(line.rate * 100).toStringAsFixed(3)}%)',
+                  value: line.amount,
+                ),
+            ],
             _PriceRow(label: 'Shipping', value: shipping),
             const Divider(height: 28),
             _PriceRow(label: 'Total', value: total, emphasized: true),
@@ -843,6 +934,72 @@ class CheckoutReviewPanel extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PromoCodeField extends StatefulWidget {
+  const _PromoCodeField({
+    required this.code,
+    required this.appliedCouponCode,
+    required this.onChanged,
+    required this.onApply,
+    required this.onRemove,
+  });
+
+  final String code;
+  final String appliedCouponCode;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onApply;
+  final VoidCallback onRemove;
+
+  @override
+  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+}
+
+class _PromoCodeFieldState extends State<_PromoCodeField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.code);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PromoCodeField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.code != _controller.text) {
+      _controller
+        ..text = widget.code
+        ..selection = TextSelection.collapsed(offset: widget.code.length);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      decoration: InputDecoration(
+        labelText: 'Promotional code',
+        prefixIcon: const Icon(Icons.sell_outlined),
+        suffixIcon: widget.appliedCouponCode.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Remove promotional code',
+                onPressed: widget.onRemove,
+                icon: const Icon(Icons.close),
+              ),
+      ),
+      textCapitalization: TextCapitalization.characters,
+      onChanged: widget.onChanged,
+      onSubmitted: (_) => widget.onApply(),
     );
   }
 }
@@ -869,10 +1026,17 @@ class _PriceRow extends StatelessWidget {
         children: [
           Text(label, style: style),
           const Spacer(),
-          Text(currency(value), style: style),
+          Text(_formatPrice(value), style: style),
         ],
       ),
     );
+  }
+
+  String _formatPrice(double value) {
+    if (value < 0) {
+      return '-${currency(value.abs())}';
+    }
+    return currency(value);
   }
 }
 
@@ -892,7 +1056,7 @@ class PaymentReturnView extends StatelessWidget {
   final VoidCallback? onViewAccount;
   final VoidCallback? onViewCart;
   final Order? completedOrder;
-  final void Function({
+  final Future<void> Function({
     required Order order,
     required int rating,
     required String title,
@@ -988,7 +1152,7 @@ class _PostPurchaseSurvey extends StatefulWidget {
   const _PostPurchaseSurvey({required this.order, required this.onSubmit});
 
   final Order order;
-  final void Function({
+  final Future<void> Function({
     required Order order,
     required int rating,
     required String title,
@@ -1009,6 +1173,8 @@ class _PostPurchaseSurveyState extends State<_PostPurchaseSurvey> {
   bool _anonymous = false;
   bool _recommend = true;
   bool _submitted = false;
+  bool _submitting = false;
+  String _error = '';
 
   @override
   void dispose() {
@@ -1076,20 +1242,52 @@ class _PostPurchaseSurveyState extends State<_PostPurchaseSurvey> {
           onChanged: (value) => setState(() => _recommend = value),
         ),
         FilledButton.icon(
-          onPressed: () {
-            widget.onSubmit(
-              order: widget.order,
-              rating: _rating,
-              title: _title.text,
-              body: _body.text,
-              anonymous: _anonymous,
-              wouldRecommend: _recommend,
-            );
-            setState(() => _submitted = true);
-          },
-          icon: const Icon(Icons.send_outlined),
-          label: const Text('Submit review'),
+          onPressed: _submitting
+              ? null
+              : () async {
+                  setState(() {
+                    _submitting = true;
+                    _error = '';
+                  });
+                  try {
+                    await widget.onSubmit(
+                      order: widget.order,
+                      rating: _rating,
+                      title: _title.text,
+                      body: _body.text,
+                      anonymous: _anonymous,
+                      wouldRecommend: _recommend,
+                    );
+                    if (mounted) {
+                      setState(() => _submitted = true);
+                    }
+                  } catch (error) {
+                    if (mounted) {
+                      setState(() {
+                        _error = 'Review save failed: $error';
+                      });
+                    }
+                  } finally {
+                    if (mounted) {
+                      setState(() => _submitting = false);
+                    }
+                  }
+                },
+          icon: _submitting
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.send_outlined),
+          label: Text(_submitting ? 'Submitting' : 'Submit review'),
         ),
+        if (_error.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
       ],
     );
   }
@@ -1115,6 +1313,23 @@ String _orderDate(Order order) {
   return '$month/$day/${value.year}';
 }
 
+double _orderTaxTotal(Order order) {
+  if (order.taxBreakdown.isNotEmpty) {
+    return order.taxBreakdown.fold(0, (sum, line) => sum + line.amount);
+  }
+  final lineSubtotal = order.lines.fold<double>(
+    0,
+    (total, line) => total + line.total,
+  );
+  final subtotal = order.subtotal > 0 ? order.subtotal : lineSubtotal;
+  return math.max(
+    0,
+    order.total -
+        order.shippingTotal -
+        math.max(0, subtotal - order.discountTotal),
+  );
+}
+
 String _invoiceHtml(
   Order order,
   StoreInfo storeInfo, {
@@ -1131,19 +1346,29 @@ String _invoiceHtml(
           .where((item) => item.trim().isNotEmpty)
           .map(htmlEscape.convert)
           .join('<br>');
-  final subtotal = order.lines.fold<double>(
+  final lineSubtotal = order.lines.fold<double>(
     0,
     (total, line) => total + line.total,
   );
-  final tax = math.max(0.0, order.total - order.shippingTotal - subtotal);
+  final subtotal = order.subtotal > 0 ? order.subtotal : lineSubtotal;
+  final discount = order.discountTotal;
+  final tax = _orderTaxTotal(order);
+  final taxSummary = order.taxBreakdown.isEmpty
+      ? '<div><strong>TAX</strong><span>${currency(tax)}</span></div>'
+      : order.taxBreakdown
+            .map(
+              (line) =>
+                  '<div><strong>${htmlEscape.convert(line.jurisdiction.toUpperCase())} TAX</strong><span>${currency(line.amount)}</span></div>',
+            )
+            .join();
   final rows = order.lines.isEmpty
       ? '''
         <tr>
           <td class="item-photo"></td>
           <td><strong>Order item</strong><br><em>EgbeAnom Fragrance</em></td>
           <td>${order.itemCount}</td>
-          <td>${currency(order.total - order.shippingTotal)}</td>
-          <td>${currency(order.total - order.shippingTotal)}</td>
+          <td>${currency(math.max(0, subtotal - discount))}</td>
+          <td>${currency(math.max(0, subtotal - discount))}</td>
         </tr>
       '''
       : order.lines
@@ -1253,8 +1478,9 @@ String _invoiceHtml(
     <div class="thank-you"><span class="script">Thank you</span>for choosing EgbeAnom Fragrance.</div>
     <div class="invoice-summary">
       <div><strong>SUBTOTAL</strong><span>${currency(subtotal)}</span></div>
+      ${discount > 0 ? '<div><strong>DISCOUNT${order.couponCode.isEmpty ? '' : ' (${htmlEscape.convert(order.couponCode)})'}</strong><span>-${currency(discount)}</span></div>' : ''}
       <div><strong>SHIPPING</strong><span>${currency(order.shippingTotal)}</span></div>
-      <div><strong>TAX</strong><span>${currency(tax)}</span></div>
+      $taxSummary
       <div class="grand"><span>TOTAL</span><span>${currency(order.total)}</span></div>
     </div>
   </div>

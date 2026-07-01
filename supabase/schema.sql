@@ -180,6 +180,9 @@ create table if not exists public.coupon_rules (
   minimum_spend numeric(10,2) not null default 0,
   usage_limit integer not null default 0,
   used integer not null default 0,
+  buy_quantity integer not null default 0,
+  get_quantity integer not null default 0,
+  get_price numeric(10,2) not null default 0,
   starts_on text not null default '',
   ends_on text not null default '',
   is_active boolean not null default true,
@@ -188,8 +191,13 @@ create table if not exists public.coupon_rules (
   updated_at timestamptz not null default now()
 );
 
+alter table public.coupon_rules
+  add column if not exists buy_quantity integer not null default 0,
+  add column if not exists get_quantity integer not null default 0,
+  add column if not exists get_price numeric(10,2) not null default 0;
+
 create table if not exists public.payment_methods (
-  id text primary key,
+  id bigint generated always as identity primary key,
   name text not null,
   provider text not null,
   status text not null default 'Not connected',
@@ -212,12 +220,16 @@ create table if not exists public.shipping_options (
   service text not null,
   priority text not null default 'Standard',
   price numeric(10,2) not null default 0,
+  charge_type text not null default 'per_order',
   estimated_days text not null default '3-5 business days',
   is_enabled boolean not null default true,
   sort_order integer not null default 10,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.shipping_options
+  add column if not exists charge_type text not null default 'per_order';
 
 create table if not exists public.store_info (
   id text primary key default 'primary',
@@ -228,6 +240,7 @@ create table if not exists public.store_info (
   address_line1 text not null default '',
   address_line2 text not null default '',
   city text not null default '',
+  county text not null default '',
   state text not null default '',
   postal_code text not null default '',
   country text not null default 'US',
@@ -242,6 +255,9 @@ create table if not exists public.store_info (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.store_info
+  add column if not exists county text not null default '';
 
 create table if not exists public.tax_rules (
   id text primary key,
@@ -536,6 +552,7 @@ drop policy if exists "public content read" on public.content_blocks;
 drop policy if exists "public site setting read" on public.site_settings;
 drop policy if exists "public approved review read" on public.store_reviews;
 drop policy if exists "public enabled payment read" on public.payment_methods;
+drop policy if exists "backend admins manage payment methods" on public.payment_methods;
 drop policy if exists "public active coupon read" on public.coupon_rules;
 drop policy if exists "customers own profile read" on public.store_customers;
 drop policy if exists "customers own email profile read" on public.store_customers;
@@ -701,6 +718,8 @@ create policy "backend admins manage product variants" on public.product_variant
 create policy "backend admins manage notes" on public.fragrance_notes
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage coupons" on public.coupon_rules
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "backend admins manage payment methods" on public.payment_methods
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage store info" on public.store_info
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
