@@ -65,6 +65,7 @@ flutter:
     - assets/images/bg_image.png
     - assets/images/logo.png
     - assets/images/banner.png
+    - assets/images/egbeanom_qr_code.png
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg

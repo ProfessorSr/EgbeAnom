@@ -48,6 +48,7 @@ class _StoreShellState extends State<StoreShell> {
   String _promoCode = '';
   CouponRule? _appliedCoupon;
   String _promoMessage = '';
+  bool _placingOrder = false;
 
   final List<ContentBlock> _contentBlocks = [];
 
@@ -721,7 +722,7 @@ class _StoreShellState extends State<StoreShell> {
 
   List<TaxRule> get _matchedTaxRules {
     final rules =
-        _taxRules
+        _effectiveTaxRules
             .where((rule) => rule.isEnabled)
             .where(_taxRuleMatches)
             .toList()
@@ -729,36 +730,94 @@ class _StoreShellState extends State<StoreShell> {
     return rules;
   }
 
+  List<TaxRule> get _effectiveTaxRules {
+    final rules = [..._taxRules];
+    final existingVatCountries = {
+      for (final rule in rules)
+        if (_taxRuleScope(rule) == 'vat') normalizeCountryCode(rule.country),
+    };
+    for (final rate in standardInternationalTaxRates) {
+      if (existingVatCountries.contains(rate.code)) {
+        continue;
+      }
+      rules.add(
+        TaxRule(
+          id: 'vat-${rate.code.toLowerCase()}',
+          name: '${rate.country} VAT/GST',
+          country: rate.code,
+          taxType: 'vat',
+          rate: rate.rate,
+          isVat: true,
+          isEnabled: true,
+          sortOrder: 50,
+        ),
+      );
+    }
+    return rules;
+  }
+
   bool _taxRuleMatches(TaxRule rule) {
     final customer = _checkoutShippingAddress;
-    if (!_sameText(rule.country, _storeInfo.country) ||
-        !_sameText(customer.country, _storeInfo.country)) {
+    final scope = _taxRuleScope(rule);
+    if (scope == 'vat') {
+      final storeCountry = normalizeCountryCode(_storeInfo.country);
+      final customerCountry = normalizeCountryCode(customer.country);
+      final ruleCountry = normalizeCountryCode(rule.country);
+      return customerCountry.isNotEmpty &&
+          customerCountry != storeCountry &&
+          customerCountry == ruleCountry;
+    }
+    if (scope == 'other') {
+      return true;
+    }
+    final storeCountry = normalizeCountryCode(_storeInfo.country);
+    final customerCountry = normalizeCountryCode(customer.country);
+    final ruleCountry = normalizeCountryCode(rule.country);
+    if (storeCountry.isEmpty ||
+        customerCountry != storeCountry ||
+        ruleCountry != storeCountry) {
       return false;
     }
-    final hasState = rule.state.trim().isNotEmpty;
-    final hasCounty = rule.county.trim().isNotEmpty;
-    final hasCity = rule.city.trim().isNotEmpty;
-    final hasZip = rule.postalCodePrefix.trim().isNotEmpty;
-    if (hasState &&
-        (!_sameText(rule.state, _storeInfo.state) ||
-            !_sameText(customer.state, _storeInfo.state))) {
-      return false;
+    if (scope == 'state') {
+      return _sameText(rule.state, _storeInfo.state) &&
+          _sameText(customer.state, _storeInfo.state);
     }
-    if (hasCounty &&
-        (!_sameText(rule.county, _storeInfo.county) ||
-            !_sameText(customer.county, _storeInfo.county))) {
-      return false;
+    if (scope == 'county') {
+      return _sameText(rule.state, _storeInfo.state) &&
+          _sameText(customer.state, _storeInfo.state) &&
+          _sameText(rule.county, _storeInfo.county) &&
+          _sameText(customer.county, _storeInfo.county);
     }
-    if (hasCity &&
-        (!_sameText(rule.city, _storeInfo.city) ||
-            !_sameText(customer.city, _storeInfo.city))) {
-      return false;
+    if (scope == 'city') {
+      return _sameText(rule.state, _storeInfo.state) &&
+          _sameText(customer.state, _storeInfo.state) &&
+          _sameText(rule.county, _storeInfo.county) &&
+          _sameText(customer.county, _storeInfo.county) &&
+          _sameText(rule.city, _storeInfo.city) &&
+          _sameText(customer.city, _storeInfo.city);
     }
-    if (hasZip &&
-        !customer.postalCode.trim().startsWith(rule.postalCodePrefix.trim())) {
-      return false;
+    return false;
+  }
+
+  String _taxRuleScope(TaxRule rule) {
+    final type = rule.taxType.trim().toLowerCase();
+    if (type == 'state' ||
+        type == 'county' ||
+        type == 'city' ||
+        type == 'other' ||
+        type == 'vat') {
+      return type;
     }
-    return hasState || hasCounty || hasCity || hasZip;
+    if (rule.city.trim().isNotEmpty) {
+      return 'city';
+    }
+    if (rule.county.trim().isNotEmpty) {
+      return 'county';
+    }
+    if (rule.state.trim().isNotEmpty) {
+      return 'state';
+    }
+    return '';
   }
 
   bool _sameText(String left, String right) =>
@@ -767,14 +826,21 @@ class _StoreShellState extends State<StoreShell> {
       right.trim().isNotEmpty;
 
   String _taxJurisdiction(TaxRule rule) {
-    if (rule.city.trim().isNotEmpty) {
+    final scope = _taxRuleScope(rule);
+    if (scope == 'city') {
       return 'City';
     }
-    if (rule.county.trim().isNotEmpty) {
+    if (scope == 'county') {
       return 'County';
     }
-    if (rule.state.trim().isNotEmpty) {
+    if (scope == 'state') {
       return 'State';
+    }
+    if (scope == 'other') {
+      return rule.name.trim().isEmpty ? 'Other' : rule.name;
+    }
+    if (scope == 'vat') {
+      return '${countryNameForCode(rule.country)} VAT/GST';
     }
     return rule.taxType;
   }
@@ -1169,8 +1235,8 @@ class _StoreShellState extends State<StoreShell> {
     });
   }
 
-  void _checkout() {
-    if (_cart.isEmpty) {
+  Future<void> _checkout() async {
+    if (_placingOrder || _cart.isEmpty) {
       return;
     }
     final appliedCoupon = _validAppliedCoupon;
@@ -1197,7 +1263,6 @@ class _StoreShellState extends State<StoreShell> {
     final email = customer?.email ?? _checkoutEmail.trim();
     final orderId = 'EA-${1049 + _orders.length}';
     final shippingOption = _selectedShippingOption;
-    late final Order order;
     final lines = _cart
         .map(
           (line) => CartLine(
@@ -1207,8 +1272,81 @@ class _StoreShellState extends State<StoreShell> {
           ),
         )
         .toList();
+    final order = Order(
+      id: orderId,
+      customer: customerName,
+      email: email,
+      total: _cartTotal,
+      subtotal: _cartSubtotal,
+      discountTotal: _discountTotal,
+      couponCode: appliedCoupon?.code ?? '',
+      itemCount: _cartCount,
+      status: 'Paid',
+      financialStatus: 'Paid',
+      fulfillmentStatus: 'Unfulfilled',
+      shippingCarrier: shippingOption.carrier,
+      shippingService: shippingOption.service,
+      shippingPriority: shippingOption.priority,
+      shippingTotal: _shipping,
+      taxBreakdown: _taxBreakdown,
+      shippingAddress: customer == null
+          ? ShippingAddress(
+              firstName: _checkoutShippingAddress.firstName,
+              lastName: _checkoutShippingAddress.lastName,
+              addressLine1: _checkoutShippingAddress.addressLine1,
+              addressLine2: _checkoutShippingAddress.addressLine2,
+              city: _checkoutShippingAddress.city,
+              county: _checkoutShippingAddress.county,
+              state: _checkoutShippingAddress.state,
+              postalCode: _checkoutShippingAddress.postalCode,
+              country: _checkoutShippingAddress.country,
+              phone: _checkoutPhone,
+              email: email,
+            )
+          : ShippingAddress(
+              firstName: customerName.split(' ').first,
+              lastName: customerName.split(' ').skip(1).join(' '),
+              addressLine1: customer.addressLine1,
+              addressLine2: customer.addressLine2,
+              city: customer.city,
+              county: customer.county,
+              state: customer.state,
+              postalCode: customer.postalCode,
+              country: customer.country,
+              phone: _checkoutPhone,
+              email: email,
+            ),
+      createdAt: DateTime.now(),
+      lines: lines,
+    );
+
+    setState(() => _placingOrder = true);
+    try {
+      await _gateway.upsertOrder(_orderRow(order));
+      await _gateway.insertOrderItems(_orderItemRows(order));
+      if (appliedCoupon != null) {
+        appliedCoupon.used += 1;
+        try {
+          await _gateway.upsertCouponRule(_couponRow(appliedCoupon));
+        } catch (error) {
+          _showStatusSnack(
+            'Order saved, but coupon usage update failed: $error',
+          );
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _placingOrder = false);
+        _showStatusSnack('Order could not be saved: $error');
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
+      _placingOrder = false;
       for (final line in _cart) {
         line.product.stock -= line.quantity;
         line.variant?.stock -= line.quantity;
@@ -1223,53 +1361,6 @@ class _StoreShellState extends State<StoreShell> {
               .toDouble();
         }
       }
-      order = Order(
-        id: orderId,
-        customer: customerName,
-        email: email,
-        total: _cartTotal,
-        subtotal: _cartSubtotal,
-        discountTotal: _discountTotal,
-        couponCode: appliedCoupon?.code ?? '',
-        itemCount: _cartCount,
-        status: 'Paid',
-        financialStatus: 'Paid',
-        fulfillmentStatus: 'Unfulfilled',
-        shippingCarrier: shippingOption.carrier,
-        shippingService: shippingOption.service,
-        shippingPriority: shippingOption.priority,
-        shippingTotal: _shipping,
-        taxBreakdown: _taxBreakdown,
-        shippingAddress: customer == null
-            ? ShippingAddress(
-                firstName: _checkoutShippingAddress.firstName,
-                lastName: _checkoutShippingAddress.lastName,
-                addressLine1: _checkoutShippingAddress.addressLine1,
-                addressLine2: _checkoutShippingAddress.addressLine2,
-                city: _checkoutShippingAddress.city,
-                county: _checkoutShippingAddress.county,
-                state: _checkoutShippingAddress.state,
-                postalCode: _checkoutShippingAddress.postalCode,
-                country: _checkoutShippingAddress.country,
-                phone: _checkoutPhone,
-                email: email,
-              )
-            : ShippingAddress(
-                firstName: customerName.split(' ').first,
-                lastName: customerName.split(' ').skip(1).join(' '),
-                addressLine1: customer.addressLine1,
-                addressLine2: customer.addressLine2,
-                city: customer.city,
-                county: customer.county,
-                state: customer.state,
-                postalCode: customer.postalCode,
-                country: customer.country,
-                phone: _checkoutPhone,
-                email: email,
-              ),
-        createdAt: DateTime.now(),
-        lines: lines,
-      );
       _orders.insert(0, order);
       _lastCompletedOrder = order;
       _recordDailyEvent(orders: 1, revenue: _cartTotal);
@@ -1300,12 +1391,6 @@ class _StoreShellState extends State<StoreShell> {
       _promoMessage = '';
       _view = StoreView.paymentSuccess;
     });
-    _gateway.upsertOrder(_orderRow(order));
-    _gateway.insertOrderItems(_orderItemRows(order));
-    if (appliedCoupon != null) {
-      appliedCoupon.used += 1;
-      unawaited(_gateway.upsertCouponRule(_couponRow(appliedCoupon)));
-    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Order $orderId placed and admin notified.')),
@@ -1806,6 +1891,7 @@ class _StoreShellState extends State<StoreShell> {
 
   Map<String, dynamic> _orderRow(Order order) {
     return {
+      'id': order.id,
       'order_number': order.id,
       'customer_name': order.customer,
       'email': order.email,
@@ -2677,7 +2763,7 @@ class _StoreShellState extends State<StoreShell> {
             unawaited(_refreshSelectedShippingRate());
           },
           onBackToCart: () => setState(() => _view = StoreView.cart),
-          onPlaceOrder: _checkout,
+          onPlaceOrder: () => unawaited(_checkout()),
           paymentMethods: _paymentMethods
               .where((method) => method.isEnabled)
               .toList(),

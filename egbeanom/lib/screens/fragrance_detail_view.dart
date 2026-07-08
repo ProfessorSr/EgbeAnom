@@ -127,11 +127,6 @@ class _FragranceDetailViewState extends State<FragranceDetailView> {
                           ],
                           const SizedBox(height: 14),
                           _FragranceSectionsCard(product: item),
-                          const SizedBox(height: 14),
-                          _FragranceComments(
-                            product: item,
-                            reviews: widget.reviews,
-                          ),
                         ],
                       ),
                     ),
@@ -276,6 +271,13 @@ class _FragranceDetailViewState extends State<FragranceDetailView> {
                                       .map((method) => method.name)
                                       .join(', '),
                           ),
+                          if (widget.reviews.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            _FragranceComments(
+                              product: item,
+                              reviews: widget.reviews,
+                            ),
+                          ],
                           if (widget.canSubmitReview) ...[
                             const SizedBox(height: 12),
                             _FragranceReviewForm(

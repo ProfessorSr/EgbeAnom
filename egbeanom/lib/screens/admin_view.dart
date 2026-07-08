@@ -380,6 +380,7 @@ class _AdminViewState extends State<AdminView> {
       ),
       AdminSection.taxes => _TaxRulesSection(
         taxRules: widget.taxRules,
+        storeInfo: widget.storeInfo,
         onSave: widget.onSaveTaxRule,
         onDelete: widget.onDeleteTaxRule,
       ),
@@ -5285,46 +5286,123 @@ class _OrdersSection extends StatefulWidget {
 
 class _OrdersSectionState extends State<_OrdersSection> {
   final Set<String> _selectedOrderIds = {};
-  String _sortBy = 'Shipping method';
+  String _shippingFilter = 'All';
   String _statusFilter = 'All';
   String _batchAction = 'Print Pack List';
   String _printPacket = '';
   bool _isApplyingBatchAction = false;
 
+  static const List<String> _shippingFilters = [
+    'All',
+    'Standard',
+    'Priority',
+    'Priority One Day',
+    'Ground',
+  ];
+
+  static const List<String> _statusFilters = [
+    'All',
+    'Pending',
+    'Processing',
+    'Label printed',
+    'Sent',
+    'Delivered',
+  ];
+
   List<Order> get _visibleOrders {
     final orders = widget.orders.where((order) {
-      if (_statusFilter == 'All') {
-        return true;
-      }
-      return order.fulfillmentStatus == _statusFilter ||
-          order.status == _statusFilter ||
-          order.labelStatus == _statusFilter;
+      return _matchesShippingFilter(order) && _matchesStatusFilter(order);
     }).toList();
 
-    final methodRank = <String, int>{};
-    for (final option in widget.shippingOptions) {
-      methodRank.putIfAbsent(
-        '${option.carrier} ${option.service}',
-        () => methodRank.length,
-      );
-    }
     orders.sort((a, b) {
-      return switch (_sortBy) {
-        'Shipping method' =>
-          (methodRank['${a.shippingCarrier} ${a.shippingService}'] ?? 999)
-              .compareTo(
-                methodRank['${b.shippingCarrier} ${b.shippingService}'] ?? 999,
-              ),
-        'Shipping priority' => a.shippingPriority.compareTo(b.shippingPriority),
-        'Newest' => (b.createdAt ?? DateTime(2000)).compareTo(
-          a.createdAt ?? DateTime(2000),
-        ),
-        'Total' => b.total.compareTo(a.total),
-        'Status' => a.fulfillmentStatus.compareTo(b.fulfillmentStatus),
-        _ => a.id.compareTo(b.id),
-      };
+      final shippingCompare = _shippingRank(a).compareTo(_shippingRank(b));
+      if (shippingCompare != 0) {
+        return shippingCompare;
+      }
+      final statusCompare = _statusRank(a).compareTo(_statusRank(b));
+      if (statusCompare != 0) {
+        return statusCompare;
+      }
+      return (b.createdAt ?? DateTime(2000)).compareTo(
+        a.createdAt ?? DateTime(2000),
+      );
     });
     return orders;
+  }
+
+  bool _matchesShippingFilter(Order order) {
+    if (_shippingFilter == 'All') {
+      return true;
+    }
+    return _shippingType(order) == _shippingFilter;
+  }
+
+  bool _matchesStatusFilter(Order order) {
+    if (_statusFilter == 'All') {
+      return true;
+    }
+    return _workflowStatus(order) == _statusFilter;
+  }
+
+  int _shippingRank(Order order) {
+    final type = _shippingType(order);
+    final index = _shippingFilters.indexOf(type);
+    return index == -1 ? _shippingFilters.length : index;
+  }
+
+  int _statusRank(Order order) {
+    final status = _workflowStatus(order);
+    final index = _statusFilters.indexOf(status);
+    return index == -1 ? _statusFilters.length : index;
+  }
+
+  String _shippingType(Order order) {
+    final text =
+        '${order.shippingPriority} ${order.shippingCarrier} ${order.shippingService}'
+            .toLowerCase();
+    if (text.contains('one day') ||
+        text.contains('1 day') ||
+        text.contains('overnight') ||
+        text.contains('express')) {
+      return 'Priority One Day';
+    }
+    if (text.contains('priority')) {
+      return 'Priority';
+    }
+    if (text.contains('ground')) {
+      return 'Ground';
+    }
+    return 'Standard';
+  }
+
+  String _workflowStatus(Order order) {
+    final fulfillment = order.fulfillmentStatus.toLowerCase();
+    final status = order.status.toLowerCase();
+    final label = order.labelStatus.toLowerCase();
+
+    if (fulfillment == 'delivered' || status == 'delivered') {
+      return 'Delivered';
+    }
+    if (fulfillment == 'sent' ||
+        fulfillment == 'shipped' ||
+        status == 'sent' ||
+        status == 'shipped') {
+      return 'Sent';
+    }
+    if (fulfillment == 'label printed' ||
+        fulfillment == 'label created' ||
+        label == 'label printed' ||
+        label == 'label created') {
+      return 'Label printed';
+    }
+    if (fulfillment == 'processing' ||
+        fulfillment == 'being picked' ||
+        fulfillment == 'packing' ||
+        status == 'processing' ||
+        status == 'picking') {
+      return 'Processing';
+    }
+    return 'Pending';
   }
 
   List<Order> get _selectedOrders => widget.orders
@@ -5351,11 +5429,11 @@ class _OrdersSectionState extends State<_OrdersSection> {
     widget.onBatchUpdateOrders(orders, 'Processing', 'Not requested');
     final packet = orders
         .map((order) => _packListHtml(order, widget.storeInfo))
-        .join('\n<div class="egbeanom-page-break"></div>\n');
+        .join('\n');
     setState(() {
       _printPacket = _buildPrintPacket(orders);
     });
-    printHtmlDocument('Egbe Anom pack list', packet);
+    printHtmlDocument('Egbe Anom pack lists (${orders.length})', packet);
   }
 
   void _printInvoices() {
@@ -5365,11 +5443,11 @@ class _OrdersSectionState extends State<_OrdersSection> {
     }
     final packet = orders
         .map((order) => _invoiceHtml(order, widget.storeInfo, printLite: true))
-        .join('\n<div class="egbeanom-page-break"></div>\n');
+        .join('\n');
     setState(() {
       _printPacket = orders.map(_buildInvoicePacket).join('\n\n');
     });
-    printHtmlDocument('Egbe Anom invoices', packet);
+    printHtmlDocument('Egbe Anom invoices (${orders.length})', packet);
   }
 
   Future<void> _printShippingLabels() async {
@@ -5398,16 +5476,15 @@ class _OrdersSectionState extends State<_OrdersSection> {
     }
 
     if (completed.isNotEmpty) {
-      // Label creation sends status to Label created and queues customer update email.
-      widget.onBatchUpdateOrders(completed, 'Label created', 'Label created');
+      widget.onBatchUpdateOrders(completed, 'Label printed', 'Label printed');
     }
 
     setState(() {
       _isApplyingBatchAction = false;
       _printPacket = _buildStatusPacket(
         completed,
-        'Label created',
-        'Label created',
+        'Label printed',
+        'Label printed',
       );
     });
 
@@ -5416,7 +5493,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'Printed ${completed.length} label(s). Status set to Label created and customer email queued.',
+            'Printed ${completed.length} label(s). Status set to Label printed and customer email queued.',
           ),
         ),
       );
@@ -5451,8 +5528,8 @@ class _OrdersSectionState extends State<_OrdersSection> {
         _printSelected();
       case 'Print label':
         await _printShippingLabels();
-      case 'Shipped':
-        _batchStatus('Shipped', 'Shipped');
+      case 'Sent':
+        _batchStatus('Sent', 'Sent');
     }
   }
 
@@ -5554,18 +5631,18 @@ class _OrdersSectionState extends State<_OrdersSection> {
           metrics: [
             _MetricData(
               Icons.inventory_outlined,
-              'To pick',
-              '${widget.orders.where((o) => o.fulfillmentStatus == 'Unfulfilled' || o.fulfillmentStatus == 'Being picked').length}',
+              'Pending',
+              '${widget.orders.where((o) => _workflowStatus(o) == 'Pending').length}',
             ),
             _MetricData(
               Icons.label_important_outline,
-              'Labels',
-              '${widget.orders.where((o) => o.labelStatus == 'Label created').length}',
+              'Label printed',
+              '${widget.orders.where((o) => _workflowStatus(o) == 'Label printed').length}',
             ),
             _MetricData(
               Icons.local_shipping_outlined,
               'Sent',
-              '${widget.orders.where((o) => o.fulfillmentStatus == 'Sent' || o.fulfillmentStatus == 'Shipped').length}',
+              '${widget.orders.where((o) => _workflowStatus(o) == 'Sent').length}',
             ),
             _MetricData(
               Icons.check_box_outlined,
@@ -5589,56 +5666,35 @@ class _OrdersSectionState extends State<_OrdersSection> {
                     SizedBox(
                       width: 220,
                       child: DropdownButtonFormField<String>(
-                        initialValue: _sortBy,
-                        decoration: const InputDecoration(labelText: 'Sort by'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Shipping method',
-                            child: Text('Shipping method'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Newest',
-                            child: Text('Newest'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Total',
-                            child: Text('Total'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Status',
-                            child: Text('Status'),
-                          ),
+                        initialValue: _shippingFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Shipping type',
+                        ),
+                        items: [
+                          for (final option in _shippingFilters)
+                            DropdownMenuItem(
+                              value: option,
+                              child: Text(option),
+                            ),
                         ],
-                        onChanged: (value) =>
-                            setState(() => _sortBy = value ?? _sortBy),
+                        onChanged: (value) => setState(
+                          () => _shippingFilter = value ?? _shippingFilter,
+                        ),
                       ),
                     ),
                     SizedBox(
                       width: 220,
                       child: DropdownButtonFormField<String>(
                         initialValue: _statusFilter,
-                        decoration: const InputDecoration(labelText: 'Filter'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'All',
-                            child: Text('All orders'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Pending',
-                            child: Text('Pending'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Processing',
-                            child: Text('Processing'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Label created',
-                            child: Text('Label created'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Shipped',
-                            child: Text('Shipped'),
-                          ),
+                        decoration: const InputDecoration(
+                          labelText: 'Order status',
+                        ),
+                        items: [
+                          for (final option in _statusFilters)
+                            DropdownMenuItem(
+                              value: option,
+                              child: Text(option),
+                            ),
                         ],
                         onChanged: (value) => setState(
                           () => _statusFilter = value ?? _statusFilter,
@@ -5676,10 +5732,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
                             value: 'Print label',
                             child: Text('Print label'),
                           ),
-                          DropdownMenuItem(
-                            value: 'Shipped',
-                            child: Text('Shipped'),
-                          ),
+                          DropdownMenuItem(value: 'Sent', child: Text('Sent')),
                         ],
                         onChanged: (value) => setState(
                           () => _batchAction = value ?? _batchAction,
@@ -5715,7 +5768,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
                     ),
                     title: Text('${order.id} • ${order.customer}'),
                     subtitle: Text(
-                      '${order.shippingPriority} • ${order.shippingCarrier} ${order.shippingService} • ${order.fulfillmentStatus} • ${order.labelStatus}',
+                      '${_shippingType(order)} • ${order.shippingCarrier} ${order.shippingService} • ${_workflowStatus(order)}',
                     ),
                     trailing: Text(currency(order.total)),
                     children: [
@@ -7643,11 +7696,13 @@ class _StoreInfoSectionState extends State<_StoreInfoSection> {
 class _TaxRulesSection extends StatefulWidget {
   const _TaxRulesSection({
     required this.taxRules,
+    required this.storeInfo,
     required this.onSave,
     required this.onDelete,
   });
 
   final List<TaxRule> taxRules;
+  final StoreInfo storeInfo;
   final AsyncValueChanged<TaxRule> onSave;
   final AsyncValueChanged<TaxRule> onDelete;
 
@@ -7692,92 +7747,115 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
                             DataCell(Text(rule.county)),
                             DataCell(Text(rule.city)),
                             DataCell(Text(rule.postalCodePrefix)),
-                            DataCell(Text(rule.isVat ? 'VAT' : rule.taxType)),
+                            DataCell(Text(_taxRuleScopeLabel(rule))),
                             DataCell(
                               Text('${(rule.rate * 100).toStringAsFixed(3)}%'),
                             ),
                             DataCell(Text(rule.isEnabled ? 'Enabled' : 'Off')),
                             DataCell(
-                              Wrap(
-                                spacing: 4,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Edit',
-                                    onPressed: () =>
-                                        setState(() => _editing = rule),
-                                    icon: const Icon(Icons.edit_outlined),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Delete',
-                                    onPressed: () async {
-                                      final confirmed =
-                                          await showDialog<bool>(
-                                            context: this.context,
-                                            builder: (dialogContext) => AlertDialog(
-                                              title: const Text(
-                                                'Delete tax rule?',
-                                              ),
-                                              content: Text(
-                                                'This will permanently delete "${rule.name}".',
-                                              ),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () => Navigator.of(
-                                                    dialogContext,
-                                                  ).pop(false),
-                                                  child: const Text('Cancel'),
-                                                ),
-                                                FilledButton(
-                                                  onPressed: () => Navigator.of(
-                                                    dialogContext,
-                                                  ).pop(true),
-                                                  child: const Text('Delete'),
-                                                ),
-                                              ],
-                                            ),
-                                          ) ??
-                                          false;
-                                      if (!confirmed) {
-                                        return;
-                                      }
-                                      try {
-                                        await widget.onDelete(rule);
-                                        if (_editing?.id == rule.id) {
-                                          setState(() => _editing = null);
-                                        }
-                                        if (!mounted) {
-                                          return;
-                                        }
-                                        ScaffoldMessenger.of(
-                                          this.context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Tax rule "${rule.name}" deleted.',
-                                            ),
+                              SizedBox(
+                                width: 96,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 42,
+                                            height: 42,
                                           ),
-                                        );
-                                      } catch (error) {
-                                        if (!mounted) {
-                                          return;
-                                        }
-                                        ScaffoldMessenger.of(
-                                          this.context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Tax rule delete failed: $error',
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    },
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      color: Colors.redAccent,
+                                      tooltip: 'Edit',
+                                      onPressed: () =>
+                                          setState(() => _editing = rule),
+                                      icon: const Icon(Icons.edit_outlined),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 42,
+                                            height: 42,
+                                          ),
+                                      tooltip: 'Delete',
+                                      onPressed: () async {
+                                        final confirmed =
+                                            await showDialog<bool>(
+                                              context: this.context,
+                                              builder: (dialogContext) =>
+                                                  AlertDialog(
+                                                    title: const Text(
+                                                      'Delete tax rule?',
+                                                    ),
+                                                    content: Text(
+                                                      'This will permanently delete "${rule.name}".',
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () =>
+                                                            Navigator.of(
+                                                              dialogContext,
+                                                            ).pop(false),
+                                                        child: const Text(
+                                                          'Cancel',
+                                                        ),
+                                                      ),
+                                                      FilledButton(
+                                                        onPressed: () =>
+                                                            Navigator.of(
+                                                              dialogContext,
+                                                            ).pop(true),
+                                                        child: const Text(
+                                                          'Delete',
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                            ) ??
+                                            false;
+                                        if (!confirmed) {
+                                          return;
+                                        }
+                                        try {
+                                          await widget.onDelete(rule);
+                                          if (_editing?.id == rule.id) {
+                                            setState(() => _editing = null);
+                                          }
+                                          if (!mounted) {
+                                            return;
+                                          }
+                                          ScaffoldMessenger.of(
+                                            this.context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Tax rule "${rule.name}" deleted.',
+                                              ),
+                                            ),
+                                          );
+                                        } catch (error) {
+                                          if (!mounted) {
+                                            return;
+                                          }
+                                          ScaffoldMessenger.of(
+                                            this.context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Tax rule delete failed: $error',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -7793,6 +7871,7 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
               child: _TaxRuleEditor(
                 key: ValueKey(_editing?.id ?? 'tax-editor-new'),
                 rule: _editing,
+                storeInfo: widget.storeInfo,
                 onSave: (rule) async {
                   await widget.onSave(rule);
                   setState(() => _editing = null);
@@ -7806,10 +7885,45 @@ class _TaxRulesSectionState extends State<_TaxRulesSection> {
   }
 }
 
+String _taxRuleScopeLabel(TaxRule rule) {
+  final type = rule.taxType.trim().toLowerCase();
+  if (type == 'state') {
+    return 'State tax';
+  }
+  if (type == 'county') {
+    return 'County tax';
+  }
+  if (type == 'city') {
+    return 'City tax';
+  }
+  if (type == 'other') {
+    return 'Other tax';
+  }
+  if (type == 'vat') {
+    return 'VAT / import tax';
+  }
+  if (rule.city.trim().isNotEmpty) {
+    return 'City tax';
+  }
+  if (rule.county.trim().isNotEmpty) {
+    return 'County tax';
+  }
+  if (rule.state.trim().isNotEmpty) {
+    return 'State tax';
+  }
+  return 'Unassigned';
+}
+
 class _TaxRuleEditor extends StatefulWidget {
-  const _TaxRuleEditor({super.key, required this.rule, required this.onSave});
+  const _TaxRuleEditor({
+    super.key,
+    required this.rule,
+    required this.storeInfo,
+    required this.onSave,
+  });
 
   final TaxRule? rule;
+  final StoreInfo storeInfo;
   final AsyncValueChanged<TaxRule> onSave;
 
   @override
@@ -7820,23 +7934,17 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
   late final _name = TextEditingController(
     text: widget.rule?.name ?? 'New tax rule',
   );
-  late final _state = TextEditingController(text: widget.rule?.state ?? '');
-  late final _county = TextEditingController(text: widget.rule?.county ?? '');
-  late final _city = TextEditingController(text: widget.rule?.city ?? '');
-  late final _zip = TextEditingController(
-    text: widget.rule?.postalCodePrefix ?? '',
-  );
   late final _rate = TextEditingController(
     text: ((widget.rule?.rate ?? 0.082) * 100).toStringAsFixed(3),
   );
+  late String _taxScope = _scopeForRule(widget.rule);
+  late String _vatCountry = _countryForRule(widget.rule);
   bool _enabled = true;
-  bool _vat = false;
 
   @override
   void initState() {
     super.initState();
     _enabled = widget.rule?.isEnabled ?? true;
-    _vat = widget.rule?.isVat ?? false;
   }
 
   @override
@@ -7844,23 +7952,94 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.rule?.id != widget.rule?.id) {
       _name.text = widget.rule?.name ?? 'New tax rule';
-      _state.text = widget.rule?.state ?? '';
-      _county.text = widget.rule?.county ?? '';
-      _city.text = widget.rule?.city ?? '';
-      _zip.text = widget.rule?.postalCodePrefix ?? '';
       _rate.text = ((widget.rule?.rate ?? 0.082) * 100).toStringAsFixed(3);
+      _taxScope = _scopeForRule(widget.rule);
+      _vatCountry = _countryForRule(widget.rule);
       _enabled = widget.rule?.isEnabled ?? true;
-      _vat = widget.rule?.isVat ?? false;
       setState(() {});
     }
   }
 
   @override
   void dispose() {
-    for (final controller in [_name, _state, _county, _city, _zip, _rate]) {
+    for (final controller in [_name, _rate]) {
       controller.dispose();
     }
     super.dispose();
+  }
+
+  String _scopeForRule(TaxRule? rule) {
+    final type = rule?.taxType.trim().toLowerCase();
+    if (type == 'other') {
+      return 'other';
+    }
+    if (type == 'vat') {
+      return 'vat';
+    }
+    if (type == 'city' || rule?.city.trim().isNotEmpty == true) {
+      return 'city';
+    }
+    if (type == 'county' || rule?.county.trim().isNotEmpty == true) {
+      return 'county';
+    }
+    return 'state';
+  }
+
+  String _countryForRule(TaxRule? rule) {
+    final normalized = normalizeCountryCode(rule?.country ?? '');
+    if (normalized.isNotEmpty && normalized != 'US') {
+      return normalized;
+    }
+    return standardInternationalTaxRates.first.code;
+  }
+
+  String get _scopeLabel => switch (_taxScope) {
+    'city' => 'City tax',
+    'county' => 'County tax',
+    'other' => 'Other tax',
+    'vat' => 'VAT / import tax',
+    _ => 'State tax',
+  };
+
+  String get _locationSummary {
+    final store = widget.storeInfo;
+    final values = switch (_taxScope) {
+      'city' => [
+        if (store.state.trim().isNotEmpty) store.state.trim().toUpperCase(),
+        if (store.county.trim().isNotEmpty) store.county.trim(),
+        if (store.city.trim().isNotEmpty) store.city.trim(),
+      ],
+      'county' => [
+        if (store.state.trim().isNotEmpty) store.state.trim().toUpperCase(),
+        if (store.county.trim().isNotEmpty) store.county.trim(),
+      ],
+      'other' => ['Not tied to customer location'],
+      'vat' => ['Destination country: ${countryNameForCode(_vatCountry)}'],
+      _ => [
+        if (store.state.trim().isNotEmpty) store.state.trim().toUpperCase(),
+      ],
+    };
+    return values.isEmpty
+        ? 'Complete the store address on the Site Info page.'
+        : values.join(' / ');
+  }
+
+  String get _missingStoreLocationMessage {
+    if (_taxScope == 'other' || _taxScope == 'vat') {
+      return '';
+    }
+    final store = widget.storeInfo;
+    if (store.state.trim().isEmpty) {
+      return 'Add the store state on the Site Info page before saving taxes.';
+    }
+    if ((_taxScope == 'county' || _taxScope == 'city') &&
+        store.county.trim().isEmpty) {
+      return 'Add the store county on the Site Info page before saving this tax.';
+    }
+    if (_taxScope == 'city' && store.city.trim().isEmpty) {
+      return 'Add the store city on the Site Info page before saving this tax.';
+    }
+    return '';
   }
 
   @override
@@ -7878,36 +8057,69 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
               decoration: const InputDecoration(labelText: 'Name'),
             ),
             const SizedBox(height: 10),
-            TextField(
-              controller: _state,
-              decoration: const InputDecoration(labelText: 'State'),
+            DropdownButtonFormField<String>(
+              initialValue: _taxScope,
+              decoration: const InputDecoration(labelText: 'Tax type'),
+              items: const [
+                DropdownMenuItem(value: 'state', child: Text('State tax')),
+                DropdownMenuItem(value: 'county', child: Text('County tax')),
+                DropdownMenuItem(value: 'city', child: Text('City tax')),
+                DropdownMenuItem(value: 'other', child: Text('Other tax')),
+                DropdownMenuItem(value: 'vat', child: Text('VAT / import tax')),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _taxScope = value;
+                  if (_name.text.trim().isEmpty ||
+                      _name.text == 'New tax rule' ||
+                      _name.text == 'State tax' ||
+                      _name.text == 'County tax' ||
+                      _name.text == 'City tax' ||
+                      _name.text == 'Other tax' ||
+                      _name.text == 'VAT / import tax') {
+                    _name.text = _scopeLabel;
+                  }
+                });
+              },
             ),
             const SizedBox(height: 10),
-            TextField(
-              controller: _county,
-              decoration: const InputDecoration(labelText: 'County'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _city,
-              decoration: const InputDecoration(labelText: 'City'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _zip,
-              decoration: const InputDecoration(labelText: 'ZIP prefix'),
+            if (_taxScope == 'vat') ...[
+              DropdownButtonFormField<String>(
+                initialValue: _vatCountry,
+                decoration: const InputDecoration(
+                  labelText: 'Destination country',
+                ),
+                items: [
+                  for (final rate in standardInternationalTaxRates)
+                    DropdownMenuItem(
+                      value: rate.code,
+                      child: Text(rate.country),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  setState(() => _vatCountry = value);
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+            InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Store location used',
+                prefixIcon: Icon(Icons.storefront_outlined),
+              ),
+              child: Text(_locationSummary),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _rate,
               decoration: const InputDecoration(labelText: 'Rate percent'),
               keyboardType: TextInputType.number,
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('VAT'),
-              value: _vat,
-              onChanged: (value) => setState(() => _vat = value),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -7928,19 +8140,44 @@ class _TaxRuleEditorState extends State<_TaxRuleEditor> {
 
   Future<void> _save() async {
     final messenger = ScaffoldMessenger.of(context);
+    final missingStoreLocation = _missingStoreLocationMessage;
+    if (missingStoreLocation.isNotEmpty) {
+      messenger.showSnackBar(SnackBar(content: Text(missingStoreLocation)));
+      return;
+    }
+    final store = widget.storeInfo;
+    final state = _taxScope == 'other' || _taxScope == 'vat'
+        ? ''
+        : store.state.trim().toUpperCase();
+    final county = _taxScope == 'county' || _taxScope == 'city'
+        ? store.county.trim()
+        : '';
+    final city = _taxScope == 'city' ? store.city.trim() : '';
     try {
       await widget.onSave(
         TaxRule(
           id: widget.rule?.id ?? 'tax-${DateTime.now().millisecondsSinceEpoch}',
-          name: _name.text.trim().isEmpty ? 'Tax rule' : _name.text.trim(),
-          state: _state.text.trim().toUpperCase(),
-          county: _county.text.trim(),
-          city: _city.text.trim(),
-          postalCodePrefix: _zip.text.trim(),
-          taxType: _vat ? 'vat' : 'sales',
+          name: _name.text.trim().isEmpty ? _scopeLabel : _name.text.trim(),
+          country: _taxScope == 'vat'
+              ? _vatCountry
+              : (store.country.trim().isEmpty ? 'US' : store.country.trim()),
+          state: state,
+          county: county,
+          city: city,
+          postalCodePrefix: '',
+          taxType: _taxScope,
           rate: (double.tryParse(_rate.text) ?? 0) / 100,
-          isVat: _vat,
+          isVat: false,
           isEnabled: _enabled,
+          sortOrder:
+              widget.rule?.sortOrder ??
+              switch (_taxScope) {
+                'county' => 20,
+                'city' => 30,
+                'other' => 40,
+                'vat' => 50,
+                _ => 10,
+              },
         ),
       );
       if (!mounted) {
@@ -11009,7 +11246,7 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
   @override
   void initState() {
     super.initState();
-    _status = widget.order.fulfillmentStatus;
+    _status = _normalizedStatus(widget.order.fulfillmentStatus);
     _carrier = widget.order.shippingCarrier.isEmpty
         ? 'USPS'
         : widget.order.shippingCarrier;
@@ -11018,6 +11255,28 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
         : widget.order.shippingService;
     _labelStatus = widget.order.labelStatus;
     _tracking = TextEditingController(text: widget.order.trackingNumber);
+  }
+
+  String _normalizedStatus(String value) {
+    final status = value.toLowerCase();
+    if (status == 'delivered') {
+      return 'Delivered';
+    }
+    if (status == 'sent' || status == 'shipped') {
+      return 'Sent';
+    }
+    if (status == 'label printed' || status == 'label created') {
+      return 'Label printed';
+    }
+    if (status == 'processing' ||
+        status == 'being picked' ||
+        status == 'packing') {
+      return 'Processing';
+    }
+    if (status == 'cancelled') {
+      return 'Cancelled';
+    }
+    return 'Pending';
   }
 
   @override
@@ -11037,21 +11296,16 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                 initialValue: _status,
                 decoration: const InputDecoration(labelText: 'Order status'),
                 items: const [
+                  DropdownMenuItem(value: 'Pending', child: Text('Pending')),
                   DropdownMenuItem(
-                    value: 'Unfulfilled',
-                    child: Text('Unfulfilled'),
+                    value: 'Processing',
+                    child: Text('Processing'),
                   ),
                   DropdownMenuItem(
-                    value: 'Being picked',
-                    child: Text('Being picked'),
-                  ),
-                  DropdownMenuItem(value: 'Packing', child: Text('Packing')),
-                  DropdownMenuItem(
-                    value: 'Label created',
-                    child: Text('Label created'),
+                    value: 'Label printed',
+                    child: Text('Label printed'),
                   ),
                   DropdownMenuItem(value: 'Sent', child: Text('Sent')),
-                  DropdownMenuItem(value: 'Shipped', child: Text('Shipped')),
                   DropdownMenuItem(
                     value: 'Delivered',
                     child: Text('Delivered'),
@@ -11126,8 +11380,8 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                         final messenger = ScaffoldMessenger.of(context);
                         if (_carrier != 'USPS') {
                           setState(() {
-                            _labelStatus = 'Label created';
-                            _status = 'Label created';
+                            _labelStatus = 'Label printed';
+                            _status = 'Label printed';
                           });
                           return;
                         }
@@ -11141,8 +11395,8 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                           }
                           setState(() {
                             _tracking.text = label.trackingNumber;
-                            _labelStatus = label.labelStatus;
-                            _status = 'Label created';
+                            _labelStatus = 'Label printed';
+                            _status = 'Label printed';
                             _service = widget.order.shippingService.isEmpty
                                 ? _service
                                 : widget.order.shippingService;
@@ -11176,7 +11430,7 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
               child: FilledButton.icon(
                 onPressed: () {
                   widget.order
-                    ..status = _status == 'Unfulfilled'
+                    ..status = _status == 'Pending'
                         ? 'Paid'
                         : _status == 'Sent'
                         ? 'Shipped'

@@ -473,6 +473,7 @@ class _AddressFields extends StatelessWidget {
       String? county,
       String? state,
       String? postalCode,
+      String? country,
     }) {
       onChanged(
         ShippingAddress(
@@ -484,7 +485,7 @@ class _AddressFields extends StatelessWidget {
           county: county ?? address.county,
           state: state ?? address.state,
           postalCode: postalCode ?? address.postalCode,
-          country: address.country,
+          country: country ?? address.country,
           phone: address.phone,
           email: address.email,
         ),
@@ -586,6 +587,24 @@ class _AddressFields extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          initialValue: normalizeCountryCode(address.country).isEmpty
+              ? 'US'
+              : normalizeCountryCode(address.country),
+          decoration: decoration('Country'),
+          items: [
+            const DropdownMenuItem(value: 'US', child: Text('United States')),
+            for (final rate in standardInternationalTaxRates)
+              DropdownMenuItem(value: rate.code, child: Text(rate.country)),
+          ],
+          onChanged: (value) {
+            if (value == null) {
+              return;
+            }
+            updateAddress(country: value);
+          },
         ),
       ],
     );
@@ -1330,6 +1349,12 @@ double _orderTaxTotal(Order order) {
   );
 }
 
+const String _siteQrImageUrl = 'assets/assets/images/egbeanom_qr_code.png';
+const String _siteQrLabel = 'egbeanom.com';
+
+String _siteQrImage() =>
+    '<img src="$_siteQrImageUrl" alt="EgbeAnom website QR code">';
+
 String _invoiceHtml(
   Order order,
   StoreInfo storeInfo, {
@@ -1433,9 +1458,151 @@ String _invoiceHtml(
     .invoice-summary .grand { background: #050505; color: #d3a13c; border: 1px solid #d8bd80; font-size: 30px; font-weight: 700; }
     .invoice-footer { background: #fbf8f0; border-top: 1px solid #d8bd80; padding: 28px 70px 34px; display: grid; grid-template-columns: 1fr 1fr 120px; gap: 34px; align-items: center; font-family: Arial, sans-serif; }
     .invoice-footer-title { color: #b8842b; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; }
-    .invoice-qr { width: 96px; height: 96px; border: 4px solid #111; display: grid; place-items: center; text-align: center; font-size: 11px; margin-left: auto; }
+    .invoice-qr { width: 96px; height: 96px; border: 4px solid #111; box-sizing: border-box; background: #fff; padding: 4px; margin-left: auto; }
+    .invoice-qr img { display: block; width: 100%; height: 100%; object-fit: contain; }
     ${printLite ? '.invoice-top { background: #fff; color: #111; border-bottom-width: 2px; } .invoice-brand p, .invoice-meta-grid { color: #111; } .invoice-logo-mark { box-shadow: none; }' : ''}
-    @media print { .invoice-doc { max-width: none; } }
+    @media print {
+      .invoice-doc {
+        width: 8.5in !important;
+        height: 11in !important;
+        max-width: none !important;
+        margin: 0 !important;
+        border-width: 1px !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+      }
+      .invoice-top {
+        padding: .18in .28in !important;
+        grid-template-columns: 1.18in 1fr 1.75in !important;
+        gap: .22in !important;
+        border-bottom-width: .08in !important;
+      }
+      .invoice-logo-img,
+      .invoice-logo-mark {
+        width: 1.05in !important;
+        height: 1.05in !important;
+      }
+      .invoice-logo-mark {
+        font-size: 16pt !important;
+        border-width: 2px !important;
+      }
+      .invoice-logo-mark span {
+        font-size: 6pt !important;
+        letter-spacing: 2px !important;
+      }
+      .invoice-brand h1 {
+        font-size: 26pt !important;
+        line-height: 1 !important;
+      }
+      .invoice-brand .spaced {
+        font-size: 10pt !important;
+        letter-spacing: 4px !important;
+      }
+      .invoice-brand p {
+        font-size: 9pt !important;
+        margin-top: .08in !important;
+      }
+      .invoice-meta {
+        padding-left: .18in !important;
+      }
+      .invoice-meta h2 {
+        font-size: 24pt !important;
+        margin-bottom: .12in !important;
+      }
+      .invoice-meta-grid {
+        grid-template-columns: .66in 1fr !important;
+        gap: .04in .08in !important;
+        font-size: 8.5pt !important;
+      }
+      .invoice-addresses {
+        padding: .22in .34in .14in !important;
+        gap: .22in !important;
+      }
+      .gold-title {
+        font-size: 11pt !important;
+        margin-bottom: .06in !important;
+      }
+      .divider-vertical {
+        min-height: .78in !important;
+      }
+      .invoice-addresses p,
+      .contact-line {
+        font-size: 8.5pt !important;
+        line-height: 1.25 !important;
+      }
+      .contact-line {
+        grid-template-columns: .18in 1fr !important;
+        gap: .06in !important;
+        margin-bottom: .06in !important;
+      }
+      .contact-line b {
+        font-size: 11pt !important;
+      }
+      .invoice-table-wrap {
+        padding: 0 .28in .1in !important;
+      }
+      .invoice-table-wrap:before {
+        font-size: 42pt !important;
+        inset: .3in 0 auto !important;
+      }
+      .invoice-items th {
+        padding: .06in !important;
+        font-size: 7.5pt !important;
+      }
+      .invoice-items td {
+        padding: .055in !important;
+        font-size: 8pt !important;
+        line-height: 1.18 !important;
+      }
+      .invoice-items span {
+        font-size: 6.5pt !important;
+      }
+      .item-photo {
+        width: .48in !important;
+      }
+      .item-photo img {
+        width: .32in !important;
+        height: .42in !important;
+      }
+      .invoice-lower {
+        grid-template-columns: 1fr 2.35in !important;
+        gap: .18in !important;
+        padding: .06in .28in .12in !important;
+      }
+      .thank-you {
+        font-size: 9pt !important;
+      }
+      .thank-you .script {
+        font-size: 20pt !important;
+        margin-bottom: .03in !important;
+      }
+      .invoice-summary div {
+        padding: .055in .1in !important;
+        font-size: 8.5pt !important;
+      }
+      .invoice-summary .grand {
+        font-size: 14pt !important;
+      }
+      .invoice-footer {
+        padding: .12in .35in !important;
+        grid-template-columns: 1fr 1fr .65in !important;
+        gap: .14in !important;
+        font-size: 8pt !important;
+      }
+      .invoice-footer-title {
+        margin-bottom: .04in !important;
+      }
+      .invoice-qr {
+        width: .58in !important;
+        height: .58in !important;
+        border-width: 2px !important;
+        padding: .025in !important;
+      }
+      .invoice-qr img {
+        width: 100% !important;
+        height: 100% !important;
+      }
+    }
   </style>
   <div class="invoice-top">
     <div>$logo</div>
@@ -1487,7 +1654,7 @@ String _invoiceHtml(
   <div class="invoice-footer">
     <div><div class="invoice-footer-title">Customer Support</div>$contact</div>
     <div><div class="invoice-footer-title">Follow Us</div>@egbeanom.fragrance</div>
-    <div class="invoice-qr">egbeanom.com<br>QR</div>
+    <div class="invoice-qr">${_siteQrImage()}</div>
   </div>
 </section>
 ''';
@@ -1510,11 +1677,15 @@ String _packListHtml(Order order, StoreInfo storeInfo) {
             )
             .join();
   return '''
-<section class="egbeanom-print-page invoice-doc">
+<section class="egbeanom-print-page pack-list-doc">
   <style>
-    .invoice-doc { font-family: Arial, sans-serif; color: #111; max-width: 820px; margin: 0 auto; }
-    .pick-head { display: flex; justify-content: space-between; border-bottom: 3px solid #111; padding-bottom: 14px; margin-bottom: 18px; }
+    .pack-list-doc { font-family: Arial, sans-serif; color: #111; max-width: 820px; margin: 0 auto; padding: 28px; box-sizing: border-box; }
+    .pick-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 3px solid #111; padding-bottom: 14px; margin-bottom: 18px; }
     .pick-head h1 { margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+    .pick-meta { display: flex; align-items: center; gap: 16px; text-align: right; }
+    .pack-qr-wrap { text-align: center; font-size: 10px; color: #333; }
+    .pack-qr { width: 82px; height: 82px; border: 1px solid #111; box-sizing: border-box; background: #fff; padding: 4px; }
+    .pack-qr img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
     .pick-box { border: 1px solid #bbb; padding: 12px; min-height: 82px; }
     table { width: 100%; border-collapse: collapse; margin-top: 18px; }
@@ -1523,16 +1694,80 @@ String _packListHtml(Order order, StoreInfo storeInfo) {
     td span { color: #555; font-size: 12px; }
     .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 34px; }
     .sig { border-top: 1px solid #111; padding-top: 8px; }
+    @media print {
+      .pack-list-doc {
+        width: 8.5in !important;
+        height: 11in !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: .34in !important;
+        overflow: hidden !important;
+      }
+      .pick-head {
+        padding-bottom: .12in !important;
+        margin-bottom: .16in !important;
+        gap: .16in !important;
+      }
+      .pick-head h1 {
+        font-size: 21pt !important;
+      }
+      .pick-meta {
+        gap: .12in !important;
+      }
+      .pack-qr-wrap {
+        font-size: 6pt !important;
+      }
+      .pack-qr {
+        width: .62in !important;
+        height: .62in !important;
+        padding: .025in !important;
+      }
+      .pick-grid {
+        gap: .12in !important;
+        margin-bottom: .14in !important;
+      }
+      .pick-box {
+        min-height: .68in !important;
+        padding: .1in !important;
+        font-size: 9pt !important;
+        line-height: 1.25 !important;
+      }
+      table {
+        margin-top: .12in !important;
+        font-size: 8.5pt !important;
+      }
+      th {
+        padding: .06in !important;
+      }
+      td {
+        padding: .055in .06in !important;
+        line-height: 1.18 !important;
+      }
+      td span {
+        font-size: 7pt !important;
+      }
+      .signatures {
+        margin-top: .25in !important;
+        gap: .24in !important;
+        font-size: 9pt !important;
+      }
+    }
   </style>
   <div class="pick-head">
     <div>
       <h1>Pack List</h1>
       <strong>${htmlEscape.convert(storeInfo.displayName)}</strong>
     </div>
-    <div>
-      <strong>${htmlEscape.convert(order.id)}</strong><br>
-      ${_orderDate(order)}<br>
-      ${htmlEscape.convert(order.shippingPriority)}
+    <div class="pick-meta">
+      <div>
+        <strong>${htmlEscape.convert(order.id)}</strong><br>
+        ${_orderDate(order)}<br>
+        ${htmlEscape.convert(order.shippingPriority)}
+      </div>
+      <div class="pack-qr-wrap">
+        <div class="pack-qr">${_siteQrImage()}</div>
+        $_siteQrLabel
+      </div>
     </div>
   </div>
   <div class="pick-grid">

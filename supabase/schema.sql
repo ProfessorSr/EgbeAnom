@@ -564,9 +564,12 @@ drop policy if exists "backend users can read own email profile" on public.backe
 drop policy if exists "backend users can link own email profile" on public.backend_users;
 drop policy if exists "backend admins manage backend users" on public.backend_users;
 drop policy if exists "authenticated users can create orders" on public.orders;
+drop policy if exists "customers can create orders" on public.orders;
 drop policy if exists "customers read own orders" on public.orders;
+drop policy if exists "customers can create order items" on public.order_items;
 drop policy if exists "customers read own order items" on public.order_items;
 drop policy if exists "authenticated users create reviews" on public.store_reviews;
+drop policy if exists "customers create verified reviews" on public.store_reviews;
 drop policy if exists "backend admins manage reviews" on public.store_reviews;
 drop policy if exists "verified customers create order surveys" on public.order_surveys;
 drop policy if exists "customers read own surveys" on public.order_surveys;
@@ -668,12 +671,19 @@ create policy "backend users can link own email profile" on public.backend_users
 create policy "backend admins manage backend users" on public.backend_users
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 
-create policy "authenticated users can create orders" on public.orders
-  for insert with check (auth.role() = 'authenticated');
+create policy "customers can create orders" on public.orders
+  for insert with check (true);
 create policy "customers read own orders" on public.orders
   for select using (
     public.is_backend_admin()
     or email = (auth.jwt() ->> 'email')
+  );
+create policy "customers can create order items" on public.order_items
+  for insert with check (
+    exists (
+      select 1 from public.orders
+      where orders.id::text = order_items.order_id
+    )
   );
 create policy "customers read own order items" on public.order_items
   for select using (
@@ -685,20 +695,34 @@ create policy "customers read own order items" on public.order_items
     )
   );
 
-create policy "authenticated users create reviews" on public.store_reviews
+create policy "customers create verified reviews" on public.store_reviews
   for insert with check (
-    auth.role() = 'authenticated'
-    and customer_email = (auth.jwt() ->> 'email')
+    (
+      auth.role() = 'authenticated'
+      and customer_email = (auth.jwt() ->> 'email')
+    )
+    or (
+      scope = 'company'
+      and customer_email <> ''
+      and exists (
+        select 1 from public.orders
+        where orders.email = store_reviews.customer_email
+      )
+    )
   );
 create policy "backend admins manage reviews" on public.store_reviews
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "verified customers create order surveys" on public.order_surveys
   for insert with check (
-    auth.role() = 'authenticated'
-    and exists (
+    exists (
       select 1 from public.orders
       where orders.id::text = order_surveys.order_id
-        and orders.email = (auth.jwt() ->> 'email')
+        and orders.email = order_surveys.customer_email
+        and (
+          auth.role() = 'anon'
+          or auth.jwt() ->> 'email' = order_surveys.customer_email
+          or public.is_backend_admin()
+        )
     )
   );
 create policy "customers read own surveys" on public.order_surveys

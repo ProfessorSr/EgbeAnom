@@ -1468,6 +1468,129 @@ class ContentBlock {
   }
 }
 
+class InternationalTaxRate {
+  const InternationalTaxRate({
+    required this.code,
+    required this.country,
+    required this.rate,
+  });
+
+  final String code;
+  final String country;
+  final double rate;
+
+  String get displayName => '$country (${(rate * 100).toStringAsFixed(1)}%)';
+}
+
+const List<InternationalTaxRate> standardInternationalTaxRates = [
+  InternationalTaxRate(code: 'AR', country: 'Argentina', rate: 0.21),
+  InternationalTaxRate(code: 'AU', country: 'Australia', rate: 0.10),
+  InternationalTaxRate(code: 'AT', country: 'Austria', rate: 0.20),
+  InternationalTaxRate(code: 'BE', country: 'Belgium', rate: 0.21),
+  InternationalTaxRate(code: 'BG', country: 'Bulgaria', rate: 0.20),
+  InternationalTaxRate(code: 'BR', country: 'Brazil', rate: 0.17),
+  InternationalTaxRate(code: 'CA', country: 'Canada', rate: 0.05),
+  InternationalTaxRate(code: 'CL', country: 'Chile', rate: 0.19),
+  InternationalTaxRate(code: 'CO', country: 'Colombia', rate: 0.19),
+  InternationalTaxRate(code: 'HR', country: 'Croatia', rate: 0.25),
+  InternationalTaxRate(code: 'CY', country: 'Cyprus', rate: 0.19),
+  InternationalTaxRate(code: 'CZ', country: 'Czech Republic', rate: 0.21),
+  InternationalTaxRate(code: 'DK', country: 'Denmark', rate: 0.25),
+  InternationalTaxRate(code: 'EG', country: 'Egypt', rate: 0.14),
+  InternationalTaxRate(code: 'EE', country: 'Estonia', rate: 0.22),
+  InternationalTaxRate(code: 'FI', country: 'Finland', rate: 0.255),
+  InternationalTaxRate(code: 'FR', country: 'France', rate: 0.20),
+  InternationalTaxRate(code: 'DE', country: 'Germany', rate: 0.19),
+  InternationalTaxRate(code: 'GH', country: 'Ghana', rate: 0.15),
+  InternationalTaxRate(code: 'GR', country: 'Greece', rate: 0.24),
+  InternationalTaxRate(code: 'HU', country: 'Hungary', rate: 0.27),
+  InternationalTaxRate(code: 'IS', country: 'Iceland', rate: 0.24),
+  InternationalTaxRate(code: 'IN', country: 'India', rate: 0.18),
+  InternationalTaxRate(code: 'IE', country: 'Ireland', rate: 0.23),
+  InternationalTaxRate(code: 'IL', country: 'Israel', rate: 0.18),
+  InternationalTaxRate(code: 'IT', country: 'Italy', rate: 0.22),
+  InternationalTaxRate(code: 'JP', country: 'Japan', rate: 0.10),
+  InternationalTaxRate(code: 'KE', country: 'Kenya', rate: 0.16),
+  InternationalTaxRate(code: 'LV', country: 'Latvia', rate: 0.21),
+  InternationalTaxRate(code: 'LT', country: 'Lithuania', rate: 0.21),
+  InternationalTaxRate(code: 'LU', country: 'Luxembourg', rate: 0.17),
+  InternationalTaxRate(code: 'MY', country: 'Malaysia', rate: 0.08),
+  InternationalTaxRate(code: 'MT', country: 'Malta', rate: 0.18),
+  InternationalTaxRate(code: 'MX', country: 'Mexico', rate: 0.16),
+  InternationalTaxRate(code: 'MA', country: 'Morocco', rate: 0.20),
+  InternationalTaxRate(code: 'NL', country: 'Netherlands', rate: 0.21),
+  InternationalTaxRate(code: 'NZ', country: 'New Zealand', rate: 0.15),
+  InternationalTaxRate(code: 'NG', country: 'Nigeria', rate: 0.075),
+  InternationalTaxRate(code: 'NO', country: 'Norway', rate: 0.25),
+  InternationalTaxRate(code: 'PL', country: 'Poland', rate: 0.23),
+  InternationalTaxRate(code: 'PT', country: 'Portugal', rate: 0.23),
+  InternationalTaxRate(code: 'RO', country: 'Romania', rate: 0.19),
+  InternationalTaxRate(code: 'SA', country: 'Saudi Arabia', rate: 0.15),
+  InternationalTaxRate(code: 'SG', country: 'Singapore', rate: 0.09),
+  InternationalTaxRate(code: 'SK', country: 'Slovakia', rate: 0.20),
+  InternationalTaxRate(code: 'SI', country: 'Slovenia', rate: 0.22),
+  InternationalTaxRate(code: 'ZA', country: 'South Africa', rate: 0.15),
+  InternationalTaxRate(code: 'KR', country: 'South Korea', rate: 0.10),
+  InternationalTaxRate(code: 'ES', country: 'Spain', rate: 0.21),
+  InternationalTaxRate(code: 'SE', country: 'Sweden', rate: 0.25),
+  InternationalTaxRate(code: 'CH', country: 'Switzerland', rate: 0.081),
+  InternationalTaxRate(code: 'TR', country: 'Turkey', rate: 0.20),
+  InternationalTaxRate(code: 'AE', country: 'United Arab Emirates', rate: 0.05),
+  InternationalTaxRate(code: 'GB', country: 'United Kingdom', rate: 0.20),
+];
+
+const Map<String, String> countryAliases = {
+  'USA': 'US',
+  'U.S.': 'US',
+  'U.S.A.': 'US',
+  'UNITED STATES': 'US',
+  'UNITED STATES OF AMERICA': 'US',
+  'AMERICA': 'US',
+  'UK': 'GB',
+  'U.K.': 'GB',
+  'GREAT BRITAIN': 'GB',
+  'BRITAIN': 'GB',
+  'ENGLAND': 'GB',
+  'SCOTLAND': 'GB',
+  'WALES': 'GB',
+  'SOUTH KOREA': 'KR',
+  'KOREA': 'KR',
+  'CZECHIA': 'CZ',
+};
+
+String normalizeCountryCode(String value) {
+  final clean = value.trim().toUpperCase();
+  if (clean.isEmpty) {
+    return '';
+  }
+  if (clean.length == 2) {
+    return clean;
+  }
+  final alias = countryAliases[clean];
+  if (alias != null) {
+    return alias;
+  }
+  for (final rate in standardInternationalTaxRates) {
+    if (rate.country.toUpperCase() == clean) {
+      return rate.code;
+    }
+  }
+  return clean;
+}
+
+String countryNameForCode(String value) {
+  final code = normalizeCountryCode(value);
+  for (final rate in standardInternationalTaxRates) {
+    if (rate.code == code) {
+      return rate.country;
+    }
+  }
+  if (code == 'US') {
+    return 'United States';
+  }
+  return value.trim().isEmpty ? code : value.trim();
+}
+
 int _asInt(Object? value, {int fallback = 0}) {
   if (value is int) {
     return value;
