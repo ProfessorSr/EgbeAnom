@@ -135,7 +135,7 @@ class ShippingLabelResult {
   factory ShippingLabelResult.fromJson(Map<String, dynamic> json) {
     return ShippingLabelResult(
       trackingNumber: '${json['trackingNumber'] ?? ''}',
-      labelStatus: '${json['labelStatus'] ?? 'Label created'}',
+      labelStatus: '${json['labelStatus'] ?? 'Label printed'}',
       labelFileName: '${json['labelFileName'] ?? 'usps-label.pdf'}',
       labelContentType: '${json['labelContentType'] ?? 'application/pdf'}',
       labelBase64: '${json['labelBase64'] ?? ''}',

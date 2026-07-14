@@ -105,7 +105,7 @@ class InfoView extends StatelessWidget {
         icon: Icons.favorite_border,
         title: 'Wishlists',
         body:
-            'Wishlists are ready for customer account storage. The next step is saving chosen products to each customer profile so they can return to favorites later.',
+            'Signed-in customers can save favorite fragrances to their wishlist and return to those products from their account.',
       ),
       StoreInfoPage.collections => const _CommunityInfoCard(
         icon: Icons.collections_bookmark_outlined,

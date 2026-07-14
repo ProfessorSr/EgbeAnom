@@ -10,7 +10,9 @@ class Validators {
     }
     final trimmed = email.trim().toLowerCase();
     // Simple email validation: must have @ and at least one character on each side
-    if (!trimmed.contains('@') || trimmed.startsWith('@') || trimmed.endsWith('@')) {
+    if (!trimmed.contains('@') ||
+        trimmed.startsWith('@') ||
+        trimmed.endsWith('@')) {
       return 'Invalid email format';
     }
     final parts = trimmed.split('@');
@@ -66,11 +68,56 @@ class Validators {
       return 'State is required';
     }
     const validStates = {
-      'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-      'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-      'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-      'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-      'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
+      'AL',
+      'AK',
+      'AZ',
+      'AR',
+      'CA',
+      'CO',
+      'CT',
+      'DE',
+      'FL',
+      'GA',
+      'HI',
+      'ID',
+      'IL',
+      'IN',
+      'IA',
+      'KS',
+      'KY',
+      'LA',
+      'ME',
+      'MD',
+      'MA',
+      'MI',
+      'MN',
+      'MS',
+      'MO',
+      'MT',
+      'NE',
+      'NV',
+      'NH',
+      'NJ',
+      'NM',
+      'NY',
+      'NC',
+      'ND',
+      'OH',
+      'OK',
+      'OR',
+      'PA',
+      'RI',
+      'SC',
+      'SD',
+      'TN',
+      'TX',
+      'UT',
+      'VT',
+      'VA',
+      'WA',
+      'WV',
+      'WI',
+      'WY',
     };
     final upper = state.trim().toUpperCase();
     if (!validStates.contains(upper)) {
@@ -80,7 +127,12 @@ class Validators {
   }
 
   /// Validates address has required fields
-  static String? validateAddress(String? line1, String? city, String? state, String? zip) {
+  static String? validateAddress(
+    String? line1,
+    String? city,
+    String? state,
+    String? zip,
+  ) {
     if (line1 == null || line1.trim().isEmpty) {
       return 'Address line 1 is required';
     }
@@ -105,7 +157,9 @@ class Validators {
     if (quantity == null) {
       return 'Quantity is required';
     }
-    final numQty = quantity is int ? quantity : int.tryParse(quantity.toString());
+    final numQty = quantity is int
+        ? quantity
+        : int.tryParse(quantity.toString());
     if (numQty == null) {
       return 'Quantity must be a whole number';
     }
@@ -123,7 +177,9 @@ class Validators {
     if (weight == null) {
       return 'Weight is required';
     }
-    final numWeight = weight is num ? weight : double.tryParse(weight.toString());
+    final numWeight = weight is num
+        ? weight
+        : double.tryParse(weight.toString());
     if (numWeight == null) {
       return 'Weight must be a valid number';
     }
@@ -188,6 +244,41 @@ class Validators {
     final trimmed = phone.replaceAll(RegExp(r'[^\d]'), '');
     if (trimmed.length != 10) {
       return 'Phone number must be 10 digits';
+    }
+    return null;
+  }
+
+  /// Validates account password strength.
+  static String? validatePassword(String? password) {
+    if (password == null || password.isEmpty) {
+      return 'Password is required';
+    }
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters';
+    }
+    if (password.length > 128) {
+      return 'Password is too long';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      return 'Password must include an uppercase letter';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(password)) {
+      return 'Password must include a lowercase letter';
+    }
+    if (!RegExp(r'\d').hasMatch(password)) {
+      return 'Password must include a number';
+    }
+    return null;
+  }
+
+  /// Validates short account verification or password reset codes.
+  static String? validateVerificationCode(String? code) {
+    if (code == null || code.trim().isEmpty) {
+      return 'Verification code is required';
+    }
+    final clean = code.trim();
+    if (!RegExp(r'^[A-Z0-9]{6,10}$', caseSensitive: false).hasMatch(clean)) {
+      return 'Verification code must be 6-10 letters or numbers';
     }
     return null;
   }

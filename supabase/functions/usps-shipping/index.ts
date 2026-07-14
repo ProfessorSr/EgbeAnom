@@ -7,7 +7,7 @@ declare const Deno: {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') ?? 'https://egbeanom.com',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -87,6 +87,21 @@ async function requireBackendUser(request: Request) {
 }
 
 async function loadUspsSettings() {
+  const encrypted = await fetchEncryptedShippingCredential('usps');
+  if (encrypted) {
+    return {
+      credentials: {
+        customerId: stringValue(encrypted.customer_id),
+        accountNumber: stringValue(encrypted.account_number),
+        apiKey: stringValue(encrypted.api_key),
+        apiSecret: stringValue(encrypted.api_secret),
+        meterNumber: stringValue(encrypted.meter_number),
+        clientId: stringValue(encrypted.client_id),
+        clientSecret: stringValue(encrypted.client_secret),
+      },
+    };
+  }
+
   const { data: providerData, error: providerError } = await serviceClient
     .from('site_settings')
     .select('value')
@@ -133,6 +148,36 @@ async function loadUspsSettings() {
       clientSecret: stringValue(raw.client_secret),
     },
   };
+}
+
+async function fetchEncryptedShippingCredential(carrier: string): Promise<Json | null> {
+  const encryptionKey = Deno.env.get('ENCRYPTION_KEY') ?? '';
+  if (!encryptionKey.trim()) {
+    return null;
+  }
+  const { data, error } = await serviceClient
+    .from('encrypted_credentials')
+    .select('credentials_encrypted')
+    .eq('provider_type', 'shipping_carrier')
+    .eq('provider_name', carrier)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Could not load encrypted ${carrier.toUpperCase()} credentials: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
+  const { data: decrypted, error: decryptError } = await serviceClient.rpc(
+    'decrypt_credential_value',
+    {
+      p_encrypted_data: data.credentials_encrypted,
+      p_encryption_key_hex: encryptionKey.trim(),
+    },
+  );
+  if (decryptError) {
+    throw new Error(`Could not decrypt ${carrier.toUpperCase()} credentials: ${decryptError.message}`);
+  }
+  return JSON.parse(stringValue(decrypted)) as Json;
 }
 
 async function fetchUspsOAuthToken(credentials: {
@@ -322,7 +367,7 @@ async function createLabel(
     : '';
   return {
     trackingNumber: stringValue(metadata.trackingNumber),
-    labelStatus: 'Label created',
+    labelStatus: 'Label printed',
     labelFileName: parsed.labelFileName,
     labelContentType: parsed.labelContentType,
     labelBase64: parsed.labelBase64,

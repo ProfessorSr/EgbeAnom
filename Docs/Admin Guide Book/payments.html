@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payments - EgbeAnom Admin Guide</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="book-top">
+      <h1>EgbeAnom Admin Guide</h1>
+      <p>Plain-English instructions for running the store.</p>
+    </header>
+    <section class="book-grid">
+      <nav class="nav-card"><h2>Guide Pages</h2><ul><li><a href="overview.html">Overview</a></li><li><a href="catalog.html">Catalog</a></li><li><a href="categories.html">Categories</a></li><li><a href="inventory.html">Inventory</a></li><li><a href="carts.html">Carts</a></li><li><a href="promotions.html">Promotions</a></li><li><a class="active" href="payments.html">Payments</a></li><li><a href="shipping.html">Shipping</a></li><li><a href="content.html">Content</a></li><li><a href="customers.html">Customers</a></li><li><a href="orders.html">Orders</a></li><li><a href="invoices.html">Invoices</a></li><li><a href="reviews.html">Reviews</a></li><li><a href="alerts.html">Alerts</a></li><li><a href="email.html">Email</a></li><li><a href="site.html">Site</a></li><li><a href="store-info.html">Store Info</a></li><li><a href="taxes.html">Taxes</a></li><li><a href="users.html">Users</a></li><li><a href="analytics.html">Analytics</a></li><li><a href="reports.html">Reports</a></li></ul></nav>
+      <article class="page-card">
+        <span class="eyebrow">Admin Page</span>
+<h1>Payments</h1>
+<p>Use this to manage payment provider settings and check payment flow.</p>
+<h2>Plain English Version</h2>
+<ul><li>Stripe sandbox checkout is working from cart to payment to admin order update.</li><li>An order is first saved as pending and unpaid.</li><li>After Stripe says payment succeeded, the order changes to paid and stays pending for fulfillment.</li><li>Before public launch, do one small live payment with production Stripe keys.</li></ul>
+<h2>What Not To Ship</h2>
+<ul><li>Do not ship unpaid orders.</li><li>Use the order financial status to confirm payment was received.</li><li>If payment status is missing or unpaid, stop and check before sending product.</li></ul>
+<h2>After A Successful Payment</h2>
+<ul><li>The customer sees the payment received page.</li><li>The customer sees order details.</li><li>The customer can fill out the survey.</li><li>The customer should receive an invoice or order email after SMTP email is tested.</li></ul>
+<div class="next-box"><a href="index.html">Back to guide home</a></div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

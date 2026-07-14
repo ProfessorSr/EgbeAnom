@@ -769,8 +769,9 @@ class Order {
     required this.total,
     required this.itemCount,
     required this.status,
+    this.checkoutToken = '',
     this.financialStatus = 'Pending',
-    this.fulfillmentStatus = 'Unfulfilled',
+    this.fulfillmentStatus = 'Pending',
     this.shippingCarrier = '',
     this.shippingService = '',
     this.shippingPriority = 'Standard',
@@ -780,7 +781,19 @@ class Order {
     this.couponCode = '',
     this.taxBreakdown = const [],
     this.trackingNumber = '',
+    this.trackingStatus = '',
+    this.trackingUrl = '',
+    this.trackingLastCheckedAt,
     this.labelStatus = 'Not requested',
+    this.refundStatus = 'Not refunded',
+    this.refundTotal = 0,
+    this.refundReference = '',
+    this.refundReason = '',
+    this.refundedAt,
+    this.returnStatus = 'No return',
+    this.returnReason = '',
+    this.returnRestocked = false,
+    this.returnedAt,
     ShippingAddress? shippingAddress,
     this.createdAt,
     List<CartLine>? lines,
@@ -793,6 +806,7 @@ class Order {
   double total;
   final int itemCount;
   String status;
+  String checkoutToken;
   String financialStatus;
   String fulfillmentStatus;
   String shippingCarrier;
@@ -804,7 +818,19 @@ class Order {
   String couponCode;
   List<TaxBreakdownLine> taxBreakdown;
   String trackingNumber;
+  String trackingStatus;
+  String trackingUrl;
+  DateTime? trackingLastCheckedAt;
   String labelStatus;
+  String refundStatus;
+  double refundTotal;
+  String refundReference;
+  String refundReason;
+  DateTime? refundedAt;
+  String returnStatus;
+  String returnReason;
+  bool returnRestocked;
+  DateTime? returnedAt;
   ShippingAddress shippingAddress;
   DateTime? createdAt;
   final List<CartLine> lines;
@@ -860,10 +886,11 @@ class Order {
       total: _asDouble(row['grand_total']),
       itemCount: _asInt(row['item_count'], fallback: 1),
       status: _asString(row['status'], fallback: 'Pending'),
+      checkoutToken: _asString(row['checkout_token']),
       financialStatus: _asString(row['financial_status'], fallback: 'Pending'),
       fulfillmentStatus: _asString(
         row['fulfillment_status'],
-        fallback: 'Unfulfilled',
+        fallback: 'Pending',
       ),
       shippingCarrier: _asString(row['shipping_carrier']),
       shippingService: _asString(row['shipping_service']),
@@ -877,7 +904,21 @@ class Order {
       couponCode: _asString(row['coupon_code']),
       taxBreakdown: taxBreakdown,
       trackingNumber: _asString(row['tracking_number']),
+      trackingStatus: _asString(row['tracking_status']),
+      trackingUrl: _asString(row['tracking_url']),
+      trackingLastCheckedAt: DateTime.tryParse(
+        _asString(row['tracking_last_checked_at']),
+      ),
       labelStatus: _asString(row['label_status'], fallback: 'Not requested'),
+      refundStatus: _asString(row['refund_status'], fallback: 'Not refunded'),
+      refundTotal: _asDouble(row['refund_total']),
+      refundReference: _asString(row['refund_reference']),
+      refundReason: _asString(row['refund_reason']),
+      refundedAt: DateTime.tryParse(_asString(row['refunded_at'])),
+      returnStatus: _asString(row['return_status'], fallback: 'No return'),
+      returnReason: _asString(row['return_reason']),
+      returnRestocked: row['return_restocked'] == true,
+      returnedAt: DateTime.tryParse(_asString(row['returned_at'])),
       shippingAddress: ShippingAddress.fromJson(row['shipping_address']),
       createdAt: DateTime.tryParse(_asString(row['created_at'])),
       lines: parsedLines,
@@ -944,6 +985,7 @@ class ShippingOption {
 
 class EmailServerSettings {
   EmailServerSettings({
+    this.provider = 'generic',
     this.fromName = 'Egbe Anom',
     this.fromEmail = 'orders@egbeanom.com',
     this.imapHost = '',
@@ -951,9 +993,11 @@ class EmailServerSettings {
     this.smtpHost = '',
     this.smtpPort = 587,
     this.username = '',
-    this.useSsl = true,
+    this.password = '',
+    this.useSsl = false,
   });
 
+  String provider;
   String fromName;
   String fromEmail;
   String imapHost;
@@ -961,12 +1005,14 @@ class EmailServerSettings {
   String smtpHost;
   int smtpPort;
   String username;
+  String password;
   bool useSsl;
 
   factory EmailServerSettings.fromRow(Map<String, dynamic> row) {
     final value = row['value'];
     if (value is Map) {
       return EmailServerSettings(
+        provider: _asString(value['provider'], fallback: 'generic'),
         fromName: _asString(value['from_name'], fallback: 'Egbe Anom'),
         fromEmail: _asString(
           value['from_email'],
@@ -977,13 +1023,15 @@ class EmailServerSettings {
         smtpHost: _asString(value['smtp_host']),
         smtpPort: _asInt(value['smtp_port'], fallback: 587),
         username: _asString(value['username']),
-        useSsl: value['use_ssl'] != false,
+        password: _asString(value['password']),
+        useSsl: value['use_ssl'] == true,
       );
     }
     return EmailServerSettings();
   }
 
   Map<String, dynamic> toJson() => {
+    'provider': provider,
     'from_name': fromName,
     'from_email': fromEmail,
     'imap_host': imapHost,
@@ -991,6 +1039,7 @@ class EmailServerSettings {
     'smtp_host': smtpHost,
     'smtp_port': smtpPort,
     'username': username,
+    'password': password,
     'use_ssl': useSsl,
   };
 }
@@ -1006,6 +1055,8 @@ class CustomerAccount {
     required this.segment,
     this.referralCode = '',
     this.referralCredits = 0,
+    this.loyaltyPoints = 0,
+    this.referredBy = '',
     this.isNew = false,
     this.isBlocked = false,
     this.createdIp = '',
@@ -1031,6 +1082,8 @@ class CustomerAccount {
   String segment;
   String referralCode;
   double referralCredits;
+  int loyaltyPoints;
+  String referredBy;
   final bool isNew;
   bool isBlocked;
   String createdIp;
@@ -1066,6 +1119,9 @@ class CustomerAccount {
         row['referral_code'],
         fallback: email.split('@').first.toUpperCase(),
       ),
+      referralCredits: _asDouble(row['referral_credits']),
+      loyaltyPoints: _asInt(row['loyalty_points']),
+      referredBy: _asString(row['referred_by']),
       isBlocked: row['is_blocked'] == true,
       createdIp: _asString(row['created_ip']),
       lastLoginIp: _asString(row['last_login_ip']),
@@ -1092,6 +1148,8 @@ class CustomerAccount {
     'segment': segment,
     'referral_code': referralCode,
     'referral_credits': referralCredits,
+    'loyalty_points': loyaltyPoints,
+    'referred_by': referredBy,
     'is_blocked': isBlocked,
     'created_ip': createdIp,
     'last_login_ip': lastLoginIp,
@@ -1214,6 +1272,16 @@ class DailyMetric {
   final int visits;
   final int orders;
   final double revenue;
+
+  factory DailyMetric.fromRow(Map<String, dynamic> row) {
+    return DailyMetric(
+      day: _asString(row['label'], fallback: _asString(row['day'])),
+      newUsers: _asInt(row['new_users']),
+      visits: _asInt(row['visits']),
+      orders: _asInt(row['orders']),
+      revenue: _asDouble(row['revenue']),
+    );
+  }
 }
 
 class ActiveUserSession {
@@ -1241,6 +1309,79 @@ class ActiveUserSession {
       math.max(0, DateTime.now().difference(startedAt).inMinutes);
   int get secondsSinceSeen =>
       math.max(0, DateTime.now().difference(lastSeenAt).inSeconds);
+
+  factory ActiveUserSession.fromRow(Map<String, dynamic> row) {
+    final now = DateTime.now();
+    return ActiveUserSession(
+      id: _asString(row['id']),
+      visitor: _asString(row['visitor'], fallback: 'Guest visitor'),
+      currentPage: _asString(row['current_page']),
+      source: _asString(row['source'], fallback: 'Direct'),
+      referrer: _asString(row['referrer'], fallback: 'Direct'),
+      device: _asString(row['device'], fallback: 'Unknown device'),
+      startedAt: DateTime.tryParse(_asString(row['started_at'])) ?? now,
+      lastSeenAt: DateTime.tryParse(_asString(row['last_seen_at'])) ?? now,
+    );
+  }
+}
+
+class AnalyticsEvent {
+  const AnalyticsEvent({
+    required this.id,
+    required this.sessionId,
+    required this.visitor,
+    required this.eventName,
+    required this.page,
+    required this.source,
+    required this.referrer,
+    required this.device,
+    this.productId,
+    this.productName = '',
+    this.orderId = '',
+    this.value = 0,
+    this.currency = 'USD',
+    this.metadata = const {},
+    required this.occurredAt,
+  });
+
+  final String id;
+  final String sessionId;
+  final String visitor;
+  final String eventName;
+  final String page;
+  final String source;
+  final String referrer;
+  final String device;
+  final int? productId;
+  final String productName;
+  final String orderId;
+  final double value;
+  final String currency;
+  final Map<String, dynamic> metadata;
+  final DateTime occurredAt;
+
+  factory AnalyticsEvent.fromRow(Map<String, dynamic> row) {
+    return AnalyticsEvent(
+      id: _asString(row['id']),
+      sessionId: _asString(row['session_id']),
+      visitor: _asString(row['visitor'], fallback: 'Guest visitor'),
+      eventName: _asString(row['event_name']),
+      page: _asString(row['page']),
+      source: _asString(row['source'], fallback: 'Direct'),
+      referrer: _asString(row['referrer'], fallback: 'Direct'),
+      device: _asString(row['device'], fallback: 'Unknown device'),
+      productId: row['product_id'] == null ? null : _asInt(row['product_id']),
+      productName: _asString(row['product_name']),
+      orderId: _asString(row['order_id']),
+      value: _asDouble(row['value']),
+      currency: _asString(row['currency'], fallback: 'USD'),
+      metadata: row['metadata'] is Map
+          ? Map<String, dynamic>.from(row['metadata'] as Map)
+          : const {},
+      occurredAt:
+          DateTime.tryParse(_asString(row['occurred_at'])) ?? DateTime.now(),
+    );
+  }
 }
 
 class EmailTemplate {
@@ -1297,6 +1438,8 @@ class CouponRule {
     this.buyQuantity = 0,
     this.getQuantity = 0,
     this.getPrice = 0,
+    this.remainingBalance = 0,
+    this.recipientEmail = '',
     this.isActive = true,
     this.isArchived = false,
   });
@@ -1313,6 +1456,8 @@ class CouponRule {
   int buyQuantity;
   int getQuantity;
   double getPrice;
+  double remainingBalance;
+  String recipientEmail;
   bool isActive;
   bool isArchived;
 
@@ -1330,6 +1475,8 @@ class CouponRule {
       buyQuantity: _asInt(row['buy_quantity']),
       getQuantity: _asInt(row['get_quantity']),
       getPrice: _asDouble(row['get_price']),
+      remainingBalance: _asDouble(row['remaining_balance']),
+      recipientEmail: _asString(row['recipient_email']),
       isActive: row['is_active'] != false,
       isArchived: row['is_archived'] == true,
     );
@@ -1348,6 +1495,7 @@ class PaymentMethodConfig {
     this.publicKey = '',
     this.merchantId = '',
     this.apiSecret = '',
+    this.checkoutUrl = '',
     this.webhookUrl = '',
     this.statementDescriptor = '',
   });
@@ -1362,6 +1510,7 @@ class PaymentMethodConfig {
   String publicKey;
   String merchantId;
   String apiSecret;
+  String checkoutUrl;
   String webhookUrl;
   String statementDescriptor;
 
@@ -1377,6 +1526,10 @@ class PaymentMethodConfig {
       publicKey: _asString(row['public_key']),
       merchantId: _asString(row['merchant_id']),
       apiSecret: _asString(row['api_secret']),
+      checkoutUrl: _asString(
+        row['checkout_url'],
+        fallback: _asString(row['webhook_url']),
+      ),
       webhookUrl: _asString(row['webhook_url']),
       statementDescriptor: _asString(
         row['statement_descriptor'],
@@ -1603,12 +1756,17 @@ int _asInt(Object? value, {int fallback = 0}) {
 
 double _asDouble(Object? value, {double fallback = 0}) {
   if (value is double) {
-    return value;
+    return value.isFinite ? value : fallback;
   }
   if (value is num) {
-    return value.toDouble();
+    final parsed = value.toDouble();
+    return parsed.isFinite ? parsed : fallback;
   }
-  return double.tryParse('$value') ?? fallback;
+  final parsed = double.tryParse('$value');
+  if (parsed == null || !parsed.isFinite) {
+    return fallback;
+  }
+  return parsed;
 }
 
 String _asString(Object? value, {String fallback = ''}) {

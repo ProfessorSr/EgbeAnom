@@ -32,6 +32,7 @@ class _StoreShellState extends State<StoreShell> {
       'VIS-${DateTime.now().millisecondsSinceEpoch}';
   late final DateTime _visitorStartedAt = DateTime.now();
   final List<ActiveUserSession> _activeUserSessions = [];
+  final List<AnalyticsEvent> _analyticsEvents = [];
 
   final List<Fragrance> _products = [];
 
@@ -48,7 +49,11 @@ class _StoreShellState extends State<StoreShell> {
   String _promoCode = '';
   CouponRule? _appliedCoupon;
   String _promoMessage = '';
+  String _selectedCheckoutPaymentProvider = '';
   bool _placingOrder = false;
+  bool _creatingCheckoutAccount = false;
+  bool _processingPaymentReturn = false;
+  String _pendingPaymentOrderId = '';
 
   final List<ContentBlock> _contentBlocks = [];
 
@@ -75,7 +80,7 @@ class _StoreShellState extends State<StoreShell> {
   bool _adminPreviewMode = false;
   bool _refreshingShippingRate = false;
 
-  List<ActiveCart> get _marketplaceCarts => [];
+  final List<ActiveCart> _marketplaceCarts = [];
 
   final List<CustomerAccount> _customers = [];
 
@@ -166,6 +171,7 @@ class _StoreShellState extends State<StoreShell> {
       _lastBrowserRoute = route;
       _view = view;
     });
+    unawaited(_handlePaymentReturnRoute(route, view));
   }
 
   void _scheduleBrowserRouteSync() {
@@ -213,6 +219,9 @@ class _StoreShellState extends State<StoreShell> {
     });
     if (customer != null || backendUser != null) {
       await _loadStoreData();
+    }
+    if (customer != null) {
+      await _loadWishlistForCustomer(customer);
     }
   }
 
@@ -265,6 +274,22 @@ class _StoreShellState extends State<StoreShell> {
       _gateway.fetchPaymentMethods,
       [],
     );
+    final paymentProcessorCredentials = <String, Map<String, dynamic>>{};
+    for (final row in paymentMethods) {
+      final provider = '${row['provider'] ?? ''}'.trim().toLowerCase();
+      if (provider.isEmpty ||
+          paymentProcessorCredentials.containsKey(provider)) {
+        continue;
+      }
+      final credential = await fallback<Map<String, dynamic>?>(
+        () => _gateway.fetchPaymentProcessorCredentials(provider),
+        null,
+      );
+      if (credential != null && credential['value'] is Map) {
+        paymentProcessorCredentials[provider] = (credential['value'] as Map)
+            .cast<String, dynamic>();
+      }
+    }
     final shippingOptions = await fallback<List<Map<String, dynamic>>>(
       _gateway.fetchShippingOptions,
       [],
@@ -336,6 +361,22 @@ class _StoreShellState extends State<StoreShell> {
       _gateway.fetchNotifications,
       [],
     );
+    final dailyMetrics = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchDailyMetrics,
+      [],
+    );
+    final activeUserSessions = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchActiveUserSessions,
+      [],
+    );
+    final analyticsEvents = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchAnalyticsEvents,
+      [],
+    );
+    final activeCarts = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchActiveCarts,
+      [],
+    );
 
     if (!mounted) {
       return;
@@ -361,13 +402,43 @@ class _StoreShellState extends State<StoreShell> {
           ..clear()
           ..addAll(
             paymentMethods
-                .map(PaymentMethodConfig.fromRow)
+                .map((row) {
+                  final method = PaymentMethodConfig.fromRow(row);
+                  final credential =
+                      paymentProcessorCredentials[method.provider
+                          .toLowerCase()];
+                  if (credential != null) {
+                    method.checkoutUrl =
+                        _firstNonEmptyString([
+                          credential['checkoutUrl'],
+                          credential['checkout_url'],
+                          method.checkoutUrl,
+                          method.webhookUrl,
+                        ]) ??
+                        '';
+                    method.webhookUrl =
+                        _firstNonEmptyString([
+                          credential['webhookUrl'],
+                          credential['webhook_url'],
+                          method.webhookUrl,
+                        ]) ??
+                        '';
+                  }
+                  return method;
+                })
                 .where(
                   (method) => allowedPaymentProviders.contains(
                     method.provider.toLowerCase(),
                   ),
                 ),
           );
+        final enabled = _paymentMethods.where((method) => method.isEnabled);
+        if (enabled.isNotEmpty &&
+            !enabled.any(
+              (method) => method.provider == _selectedCheckoutPaymentProvider,
+            )) {
+          _selectedCheckoutPaymentProvider = enabled.first.provider;
+        }
       }
       if (shippingOptions.isNotEmpty) {
         _shippingOptions
@@ -427,6 +498,31 @@ class _StoreShellState extends State<StoreShell> {
           ..clear()
           ..addAll(notifications.map(StoreNotification.fromRow));
       }
+      if (dailyMetrics.isNotEmpty) {
+        _dailyMetrics
+          ..clear()
+          ..addAll(dailyMetrics.map(DailyMetric.fromRow));
+      }
+      if (activeUserSessions.isNotEmpty) {
+        _activeUserSessions
+          ..clear()
+          ..addAll(activeUserSessions.map(ActiveUserSession.fromRow));
+      }
+      if (analyticsEvents.isNotEmpty) {
+        _analyticsEvents
+          ..clear()
+          ..addAll(analyticsEvents.map(AnalyticsEvent.fromRow));
+      }
+      _marketplaceCarts
+        ..clear()
+        ..addAll(
+          activeCarts
+              .where(
+                (row) =>
+                    '${row['status'] ?? 'active'}'.toLowerCase() != 'recovered',
+              )
+              .map(_activeCartFromRow),
+        );
       if (siteStatus != null) {
         final status = SiteStatus.fromRow(siteStatus);
         _siteStatus
@@ -450,6 +546,7 @@ class _StoreShellState extends State<StoreShell> {
       if (emailSettings != null) {
         final settings = EmailServerSettings.fromRow(emailSettings);
         _emailSettings
+          ..provider = settings.provider
           ..fromName = settings.fromName
           ..fromEmail = settings.fromEmail
           ..imapHost = settings.imapHost
@@ -457,6 +554,7 @@ class _StoreShellState extends State<StoreShell> {
           ..smtpHost = settings.smtpHost
           ..smtpPort = settings.smtpPort
           ..username = settings.username
+          ..password = settings.password
           ..useSsl = settings.useSsl;
       }
       final legacyValue =
@@ -492,6 +590,12 @@ class _StoreShellState extends State<StoreShell> {
       }
     });
     unawaited(_loadFragranceNews());
+    final route = currentBrowserRoute();
+    final returnView = _viewForBrowserRoute(route);
+    if (returnView == StoreView.paymentSuccess ||
+        returnView == StoreView.paymentFailure) {
+      unawaited(_handlePaymentReturnRoute(route, returnView!));
+    }
   }
 
   Future<void> _loadFragranceNews() async {
@@ -535,6 +639,16 @@ class _StoreShellState extends State<StoreShell> {
       ..addAll(names);
   }
 
+  String? _firstNonEmptyString(List<Object?> values) {
+    for (final value in values) {
+      final text = '${value ?? ''}'.trim();
+      if (text.isNotEmpty) {
+        return text;
+      }
+    }
+    return null;
+  }
+
   List<Fragrance> get _visibleProducts {
     var active = _products.where((product) => product.isActive).toList();
     if (_filter != 'All') {
@@ -548,46 +662,78 @@ class _StoreShellState extends State<StoreShell> {
           .toList();
     }
     if (_query.trim().isNotEmpty) {
-      final query = _query.toLowerCase();
-      active = active
-          .where((product) => _productSearchText(product).contains(query))
-          .toList();
+      final tokens = _searchTokens(_query);
+      final scored =
+          active
+              .map(
+                (product) =>
+                    MapEntry(product, _productSearchScore(product, tokens)),
+              )
+              .where((entry) => entry.value > 0)
+              .toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
+      active = scored.map((entry) => entry.key).toList();
     }
-    active.sort((a, b) {
-      return switch (_sort) {
-        'Price low' => a.price.compareTo(b.price),
-        'Price high' => b.price.compareTo(a.price),
-        'Best sellers' => b.sold.compareTo(a.sold),
-        _ => a.id.compareTo(b.id),
-      };
-    });
+    if (_query.trim().isEmpty || _sort != 'Featured') {
+      active.sort((a, b) {
+        return switch (_sort) {
+          'Price low' => a.price.compareTo(b.price),
+          'Price high' => b.price.compareTo(a.price),
+          'Best sellers' => b.sold.compareTo(a.sold),
+          _ => a.id.compareTo(b.id),
+        };
+      });
+    }
     return active;
   }
 
-  String _productSearchText(Fragrance product) {
-    return [
-      product.name,
-      product.type,
-      product.brand,
-      product.vendor,
-      product.sku,
-      product.description,
-      product.vibe,
-      product.performance,
-      product.comparison,
-      product.fragranceProfile,
-      product.ingredients,
-      product.notes,
-      product.topNotes,
-      product.heartNotes,
-      product.baseNotes,
-      product.concentration,
-      product.gender,
-      product.season,
-      product.occasion,
-      product.family,
-      product.itemLocation,
-    ].join(' ').toLowerCase();
+  List<String> _searchTokens(String value) => value
+      .toLowerCase()
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((token) => token.length > 1)
+      .toList();
+
+  int _productSearchScore(Fragrance product, List<String> tokens) {
+    if (tokens.isEmpty) {
+      return 0;
+    }
+    final fields = {
+      product.name.toLowerCase(): 12,
+      product.sku.toLowerCase(): 10,
+      product.brand.toLowerCase(): 8,
+      product.type.toLowerCase(): 7,
+      product.notes.toLowerCase(): 6,
+      product.topNotes.toLowerCase(): 6,
+      product.heartNotes.toLowerCase(): 6,
+      product.baseNotes.toLowerCase(): 6,
+      product.vibe.toLowerCase(): 5,
+      product.performance.toLowerCase(): 5,
+      product.fragranceProfile.toLowerCase(): 5,
+      product.description.toLowerCase(): 4,
+      product.comparison.toLowerCase(): 4,
+      product.season.toLowerCase(): 3,
+      product.occasion.toLowerCase(): 3,
+      product.family.toLowerCase(): 3,
+      product.gender.toLowerCase(): 2,
+      product.concentration.toLowerCase(): 2,
+    };
+    var score = 0;
+    for (final token in tokens) {
+      var tokenMatched = false;
+      for (final entry in fields.entries) {
+        if (entry.key == token) {
+          score += entry.value * 2;
+          tokenMatched = true;
+        } else if (entry.key.contains(token)) {
+          score += entry.value;
+          tokenMatched = true;
+        }
+      }
+      if (!tokenMatched) {
+        return 0;
+      }
+    }
+    return score + product.sold + product.rating.round();
   }
 
   List<Fragrance> get _homeProducts {
@@ -624,6 +770,13 @@ class _StoreShellState extends State<StoreShell> {
 
   String get _homeShelfTitle => _siteStatus.homeShelfMode;
 
+  void _updateStoreState(VoidCallback update) {
+    if (!mounted) {
+      return;
+    }
+    setState(update);
+  }
+
   void _showStatusSnack(String message) {
     if (!mounted) {
       return;
@@ -643,6 +796,13 @@ class _StoreShellState extends State<StoreShell> {
       }
       _view = StoreView.catalog;
     });
+    if (query != null && query.trim().isNotEmpty) {
+      _recordAnalyticsEvent(
+        'search',
+        page: StoreView.catalog.name,
+        metadata: {'search_term': query.trim()},
+      );
+    }
   }
 
   BrandProfile get _egbeAnomProfile {
@@ -664,47 +824,6 @@ class _StoreShellState extends State<StoreShell> {
   int get _cartCount => _cart.fold(0, (total, line) => total + line.quantity);
   double get _cartSubtotal =>
       _cart.fold(0, (total, line) => total + line.total);
-  CouponRule? get _validAppliedCoupon {
-    final coupon = _appliedCoupon;
-    if (coupon == null) {
-      return null;
-    }
-    return _couponValidationMessage(coupon).isEmpty ? coupon : null;
-  }
-
-  double get _itemDiscount {
-    final coupon = _validAppliedCoupon;
-    if (coupon == null) {
-      return 0;
-    }
-    return switch (coupon.type) {
-      'Percent' => _cartSubtotal * coupon.value.clamp(0, 100) / 100,
-      'Fixed amount' => math.min(_cartSubtotal, math.max(0, coupon.value)),
-      'Buy X get Y' => _buyXGetYDiscount(coupon),
-      _ => 0,
-    };
-  }
-
-  double _buyXGetYDiscount(CouponRule coupon) {
-    final buyQuantity = coupon.buyQuantity;
-    final getQuantity = coupon.getQuantity;
-    if (buyQuantity <= 0 || getQuantity <= 0 || coupon.getPrice < 0) {
-      return 0;
-    }
-    final groupSize = buyQuantity + getQuantity;
-    final unitPrices = <double>[
-      for (final line in _cart)
-        for (var i = 0; i < line.quantity; i++) line.unitPrice,
-    ]..sort();
-    final eligibleCount = (unitPrices.length ~/ groupSize) * getQuantity;
-    if (eligibleCount <= 0) {
-      return 0;
-    }
-    return unitPrices.take(eligibleCount).fold<double>(0, (total, price) {
-      return total + math.max(0, price - coupon.getPrice);
-    });
-  }
-
   double get _discountedSubtotal => math.max(0, _cartSubtotal - _itemDiscount);
   List<TaxBreakdownLine> get _taxBreakdown => _matchedTaxRules
       .map(
@@ -872,13 +991,10 @@ class _StoreShellState extends State<StoreShell> {
         : option.price;
   }
 
-  double get _shippingDiscount => _validAppliedCoupon?.type == 'Free shipping'
-      ? _shippingBeforeDiscount
-      : 0;
-  double get _discountTotal => _itemDiscount + _shippingDiscount;
   double get _shipping =>
       math.max(0, _shippingBeforeDiscount - _shippingDiscount);
-  double get _cartTotal => _discountedSubtotal + _tax + _shipping;
+  double get _preCreditTotal => _discountedSubtotal + _tax + _shipping;
+  double get _cartTotal => math.max(0, _preCreditTotal - _codeCredit);
 
   void _recordDailyEvent({
     int newUsers = 0,
@@ -888,6 +1004,18 @@ class _StoreShellState extends State<StoreShell> {
   }) {
     final now = DateTime.now();
     final label = '${now.month}/${now.day}';
+    unawaited(
+      _gateway
+          .incrementDailyMetric({
+            'day': _analyticsDayKey(now),
+            'label': label,
+            'new_users': newUsers,
+            'visits': visits,
+            'orders': orders,
+            'revenue': revenue,
+          })
+          .catchError((_) {}),
+    );
     final index = _dailyMetrics.indexWhere((metric) => metric.day == label);
     if (index == -1) {
       _dailyMetrics.add(
@@ -909,6 +1037,13 @@ class _StoreShellState extends State<StoreShell> {
         revenue: metric.revenue + revenue,
       );
     }
+  }
+
+  String _analyticsDayKey(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
   }
 
   void _recordActivePageView() {
@@ -944,7 +1079,208 @@ class _StoreShellState extends State<StoreShell> {
         ..currentPage = page
         ..lastSeenAt = DateTime.now();
     }
+    final session = _activeUserSessions.firstWhere(
+      (session) => session.id == _visitorSessionId,
+    );
+    unawaited(
+      _gateway
+          .upsertActiveUserSession(_activeUserSessionRow(session))
+          .catchError((_) {}),
+    );
     _recordDailyEvent(visits: 1);
+    _recordAnalyticsEvent('page_view', page: page);
+  }
+
+  Map<String, dynamic> _activeUserSessionRow(ActiveUserSession session) {
+    return {
+      'id': session.id,
+      'visitor': session.visitor,
+      'current_page': session.currentPage,
+      'source': session.source,
+      'referrer': session.referrer,
+      'device': session.device,
+      'started_at': session.startedAt.toUtc().toIso8601String(),
+      'last_seen_at': session.lastSeenAt.toUtc().toIso8601String(),
+    };
+  }
+
+  void _recordAnalyticsEvent(
+    String eventName, {
+    String? page,
+    Fragrance? product,
+    Order? order,
+    double? value,
+    Map<String, dynamic> metadata = const {},
+  }) {
+    final now = DateTime.now();
+    final visitor =
+        _currentCustomer?.email ??
+        _currentBackendUser?.email ??
+        'Guest visitor';
+    final currentPage = page ?? _view.name;
+    final event = AnalyticsEvent(
+      id: 'EVT-${now.microsecondsSinceEpoch}-${math.Random().nextInt(99999)}',
+      sessionId: _visitorSessionId,
+      visitor: visitor,
+      eventName: eventName,
+      page: currentPage,
+      source: currentTrafficSource(),
+      referrer: currentTrafficReferrer(),
+      device: currentDeviceLabel(),
+      productId: product?.id,
+      productName: product?.name ?? '',
+      orderId: order?.id ?? '',
+      value: value ?? order?.total ?? product?.price ?? 0,
+      currency: 'USD',
+      metadata: metadata,
+      occurredAt: now,
+    );
+    void updateEvents() {
+      _analyticsEvents.insert(0, event);
+      if (_analyticsEvents.length > 1000) {
+        _analyticsEvents.removeRange(1000, _analyticsEvents.length);
+      }
+    }
+
+    if (mounted &&
+        SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      setState(updateEvents);
+    } else {
+      updateEvents();
+    }
+    unawaited(_gateway.insertAnalyticsEvent(_analyticsEventRow(event)));
+    trackGoogleAnalyticsEvent(
+      eventName,
+      page: currentPage,
+      value: event.value,
+      currency: event.currency,
+      itemName: event.productName,
+      orderId: event.orderId,
+    );
+  }
+
+  Map<String, dynamic> _analyticsEventRow(AnalyticsEvent event) {
+    return {
+      'id': event.id,
+      'session_id': event.sessionId,
+      'visitor': event.visitor,
+      'event_name': event.eventName,
+      'page': event.page,
+      'source': event.source,
+      'referrer': event.referrer,
+      'device': event.device,
+      'product_id': event.productId,
+      'product_name': event.productName,
+      'order_id': event.orderId,
+      'value': event.value,
+      'currency': event.currency,
+      'metadata': event.metadata,
+      'occurred_at': event.occurredAt.toUtc().toIso8601String(),
+    };
+  }
+
+  ActiveCart _activeCartFromRow(Map<String, dynamic> row) {
+    final lines = <CartLine>[];
+    final rawLines = row['lines'];
+    if (rawLines is List) {
+      for (final rawLine in rawLines) {
+        if (rawLine is! Map) {
+          continue;
+        }
+        final line = rawLine.cast<String, dynamic>();
+        final productId = _asInt(line['product_id']);
+        final product = _products.firstWhere(
+          (item) => item.id == productId,
+          orElse: () => Fragrance(
+            id: productId,
+            name: _asString(line['product_name'], fallback: 'Cart item'),
+            type: _asString(line['product_type'], fallback: 'Fragrance'),
+            brand: _asString(line['brand']),
+            notes: '',
+            size: _asString(line['size']),
+            price: _asDouble(line['unit_price']),
+            stock: 0,
+            sold: 0,
+            featuredColor: const Color(0xFFC88F52),
+            sku: _asString(line['sku']),
+            photoUrl: _asString(line['photo_url']),
+            vendor: '',
+            categoryId: 0,
+          ),
+        );
+        ProductVariant? variant;
+        for (final option in product.variants) {
+          if (option.id == _asInt(line['variant_id'])) {
+            variant = option;
+            break;
+          }
+        }
+        lines.add(
+          CartLine(
+            product: product,
+            variant: variant,
+            quantity: math.max(1, _asInt(line['quantity'], fallback: 1)),
+          ),
+        );
+      }
+    }
+    final lastSeen =
+        DateTime.tryParse(_asString(row['last_seen_at'])) ?? DateTime.now();
+    final minutesAgo = math.max(
+      0,
+      DateTime.now().difference(lastSeen).inMinutes,
+    );
+    return ActiveCart(
+      id: _asString(row['id'], fallback: 'CART'),
+      customer: _asString(row['customer_name'], fallback: 'Guest shopper'),
+      minutesAgo: minutesAgo,
+      lines: lines,
+    );
+  }
+
+  Map<String, dynamic> _activeCartRow({String status = 'active'}) {
+    final customer = _currentCustomer;
+    final email = (customer?.email ?? _checkoutEmail).trim().toLowerCase();
+    final name = customer?.name.trim().isNotEmpty == true
+        ? customer!.name.trim()
+        : [
+            _checkoutShippingAddress.firstName,
+            _checkoutShippingAddress.lastName,
+          ].where((part) => part.trim().isNotEmpty).join(' ').trim();
+    final now = DateTime.now().toUtc().toIso8601String();
+    return {
+      'id': 'CART-$_visitorSessionId',
+      'customer_email': email,
+      'customer_name': name.isEmpty ? 'Guest shopper' : name,
+      'status': status,
+      'item_count': _cartCount,
+      'subtotal': _cartSubtotal,
+      'lines': _cart
+          .map(
+            (line) => {
+              'product_id': line.product.id,
+              'variant_id': line.variant?.id,
+              'product_name': line.product.name,
+              'product_type': line.product.type,
+              'brand': line.product.brand,
+              'sku': line.sku,
+              'size': line.size,
+              'quantity': line.quantity,
+              'unit_price': line.unitPrice,
+              'photo_url': line.product.photoUrl,
+            },
+          )
+          .toList(),
+      'last_seen_at': now,
+    };
+  }
+
+  void _syncActiveCart({String status = 'active'}) {
+    if (_cart.isEmpty) {
+      unawaited(_gateway.markActiveCartRecovered('CART-$_visitorSessionId'));
+      return;
+    }
+    unawaited(_gateway.upsertActiveCart(_activeCartRow(status: status)));
   }
 
   void _addToCart(Fragrance product, ProductVariant variant) {
@@ -964,6 +1300,20 @@ class _StoreShellState extends State<StoreShell> {
       }
       _view = StoreView.cart;
     });
+    _syncActiveCart();
+    _recordAnalyticsEvent(
+      'add_to_cart',
+      page: StoreView.cart.name,
+      product: product,
+      value: variant.price,
+      metadata: {'sku': variant.sku, 'size': variant.size, 'quantity': 1},
+    );
+    _recordAnalyticsEvent(
+      'view_cart',
+      page: StoreView.cart.name,
+      value: _cartTotal,
+      metadata: {'items': _cartCount},
+    );
   }
 
   void _buyNow(Fragrance product, ProductVariant variant) {
@@ -977,6 +1327,20 @@ class _StoreShellState extends State<StoreShell> {
         ..add(CartLine(product: product, variant: variant));
       _view = StoreView.checkout;
     });
+    _syncActiveCart();
+    _recordAnalyticsEvent(
+      'add_to_cart',
+      page: StoreView.checkout.name,
+      product: product,
+      value: variant.price,
+      metadata: {'sku': variant.sku, 'size': variant.size, 'quantity': 1},
+    );
+    _recordAnalyticsEvent(
+      'begin_checkout',
+      page: StoreView.checkout.name,
+      value: _cartTotal,
+      metadata: {'items': _cartCount, 'source': 'buy_now'},
+    );
   }
 
   void _openBrand(String brand) {
@@ -991,6 +1355,13 @@ class _StoreShellState extends State<StoreShell> {
       _selectedProduct = product;
       _view = StoreView.detail;
     });
+    _recordAnalyticsEvent(
+      'view_item',
+      page: StoreView.detail.name,
+      product: product,
+      value: product.price,
+      metadata: {'sku': product.sku, 'type': product.type},
+    );
   }
 
   void _openInfoPage(StoreInfoPage page) {
@@ -1075,6 +1446,13 @@ class _StoreShellState extends State<StoreShell> {
     }
     _hydrateCheckoutFields();
     setState(() => _view = StoreView.checkout);
+    _syncActiveCart();
+    _recordAnalyticsEvent(
+      'begin_checkout',
+      page: StoreView.checkout.name,
+      value: _cartTotal,
+      metadata: {'items': _cartCount, 'source': 'cart'},
+    );
     unawaited(_refreshSelectedShippingRate());
   }
 
@@ -1099,79 +1477,12 @@ class _StoreShellState extends State<StoreShell> {
     );
   }
 
-  void _applyPromoCode() {
-    final code = _promoCode.trim().toUpperCase();
-    if (code.isEmpty) {
-      setState(() => _promoMessage = 'Enter a promotional code.');
-      return;
-    }
-    CouponRule? coupon;
-    for (final item in _coupons) {
-      if (item.code.trim().toUpperCase() == code) {
-        coupon = item;
-        break;
-      }
-    }
-    if (coupon == null) {
-      setState(() {
-        _appliedCoupon = null;
-        _promoMessage = 'Promotional code not found.';
-      });
-      return;
-    }
-    final matchedCoupon = coupon;
-    final message = _couponValidationMessage(matchedCoupon);
-    setState(() {
-      if (message.isEmpty) {
-        _promoCode = code;
-        _appliedCoupon = matchedCoupon;
-        _promoMessage = '${matchedCoupon.code} applied.';
-      } else {
-        _appliedCoupon = null;
-        _promoMessage = message;
-      }
-    });
-  }
-
   void _removePromoCode() {
     setState(() {
       _promoCode = '';
       _appliedCoupon = null;
       _promoMessage = '';
     });
-  }
-
-  String _couponValidationMessage(CouponRule coupon) {
-    if (!coupon.isActive || coupon.isArchived) {
-      return 'This promotional code is not active.';
-    }
-    if (coupon.type == 'Buy X get Y') {
-      if (coupon.buyQuantity <= 0 || coupon.getQuantity <= 0) {
-        return 'This promotional code is missing buy/get quantities.';
-      }
-      if (_cartCount < coupon.buyQuantity + coupon.getQuantity) {
-        return 'Add ${coupon.buyQuantity + coupon.getQuantity} eligible item(s) to use ${coupon.code}.';
-      }
-    }
-    if (coupon.usageLimit > 0 && coupon.used >= coupon.usageLimit) {
-      return 'This promotional code has reached its usage limit.';
-    }
-    if (_cartSubtotal < coupon.minimumSpend) {
-      return 'Minimum spend for ${coupon.code} is ${currency(coupon.minimumSpend)}.';
-    }
-    final now = DateTime.now();
-    final starts = DateTime.tryParse(coupon.starts.trim());
-    if (starts != null && now.isBefore(starts)) {
-      return 'This promotional code is not active yet.';
-    }
-    final ends = DateTime.tryParse(coupon.ends.trim());
-    if (ends != null) {
-      final endOfDay = DateTime(ends.year, ends.month, ends.day, 23, 59, 59);
-      if (now.isAfter(endOfDay)) {
-        return 'This promotional code has expired.';
-      }
-    }
-    return '';
   }
 
   Future<void> _refreshSelectedShippingRate() async {
@@ -1233,6 +1544,7 @@ class _StoreShellState extends State<StoreShell> {
         line.quantity = line.stockAvailable;
       }
     });
+    _syncActiveCart();
   }
 
   Future<void> _checkout() async {
@@ -1261,7 +1573,97 @@ class _StoreShellState extends State<StoreShell> {
     }
     final customerName = customer?.name ?? guestName;
     final email = customer?.email ?? _checkoutEmail.trim();
-    final orderId = 'EA-${1049 + _orders.length}';
+    final emailError = Validators.validateEmail(email);
+    if (emailError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(emailError)));
+      return;
+    }
+
+    final shippingAddress = ShippingAddress(
+      firstName: _checkoutShippingAddress.firstName,
+      lastName: _checkoutShippingAddress.lastName,
+      addressLine1: _checkoutShippingAddress.addressLine1,
+      addressLine2: _checkoutShippingAddress.addressLine2,
+      city: _checkoutShippingAddress.city,
+      county: _checkoutShippingAddress.county,
+      state: _checkoutShippingAddress.state,
+      postalCode: _checkoutShippingAddress.postalCode,
+      country: _checkoutShippingAddress.country,
+      phone: _checkoutPhone,
+      email: email,
+    );
+
+    final addressError = Validators.validateAddress(
+      shippingAddress.addressLine1,
+      shippingAddress.city,
+      shippingAddress.state,
+      shippingAddress.postalCode,
+    );
+    if (addressError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(addressError)));
+      return;
+    }
+
+    if (_checkoutPhone.trim().isNotEmpty) {
+      final phoneError = Validators.validatePhone(_checkoutPhone.trim());
+      if (phoneError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(phoneError)));
+        return;
+      }
+    }
+
+    for (final line in _cart) {
+      final quantityError = Validators.validateQuantity(line.quantity);
+      if (quantityError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(quantityError)));
+        return;
+      }
+      final inventoryError = Validators.validateInventoryAvailable(
+        line.stockAvailable,
+        line.quantity,
+      );
+      if (inventoryError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(inventoryError)));
+        return;
+      }
+    }
+
+    final orderId = 'EA-${DateTime.now().microsecondsSinceEpoch}';
+    final checkoutToken = _newCheckoutToken();
+    final selectedPaymentMethod = _selectedPaymentMethod;
+    if (selectedPaymentMethod == null) {
+      _showStatusSnack('Select an enabled payment provider to continue.');
+      return;
+    }
+    if (selectedPaymentMethod.mode.trim().toLowerCase() != 'live') {
+      _showStatusSnack(
+        '${selectedPaymentMethod.name} is running in test mode. No real charge will be captured.',
+      );
+    }
+    final stripeProvider = selectedPaymentMethod.provider
+        .trim()
+        .toLowerCase()
+        .contains('stripe');
+    String checkoutUrl = '';
+    if (!stripeProvider) {
+      checkoutUrl = await _resolveCheckoutUrl(selectedPaymentMethod);
+      if (checkoutUrl.isEmpty) {
+        _showStatusSnack(
+          '${selectedPaymentMethod.name} checkout URL is missing. Save the provider checkout URL in admin before placing orders.',
+        );
+        return;
+      }
+    }
     final shippingOption = _selectedShippingOption;
     final lines = _cart
         .map(
@@ -1281,41 +1683,16 @@ class _StoreShellState extends State<StoreShell> {
       discountTotal: _discountTotal,
       couponCode: appliedCoupon?.code ?? '',
       itemCount: _cartCount,
-      status: 'Paid',
-      financialStatus: 'Paid',
-      fulfillmentStatus: 'Unfulfilled',
+      status: 'Pending',
+      checkoutToken: checkoutToken,
+      financialStatus: 'Unpaid',
+      fulfillmentStatus: 'Pending',
       shippingCarrier: shippingOption.carrier,
       shippingService: shippingOption.service,
       shippingPriority: shippingOption.priority,
       shippingTotal: _shipping,
       taxBreakdown: _taxBreakdown,
-      shippingAddress: customer == null
-          ? ShippingAddress(
-              firstName: _checkoutShippingAddress.firstName,
-              lastName: _checkoutShippingAddress.lastName,
-              addressLine1: _checkoutShippingAddress.addressLine1,
-              addressLine2: _checkoutShippingAddress.addressLine2,
-              city: _checkoutShippingAddress.city,
-              county: _checkoutShippingAddress.county,
-              state: _checkoutShippingAddress.state,
-              postalCode: _checkoutShippingAddress.postalCode,
-              country: _checkoutShippingAddress.country,
-              phone: _checkoutPhone,
-              email: email,
-            )
-          : ShippingAddress(
-              firstName: customerName.split(' ').first,
-              lastName: customerName.split(' ').skip(1).join(' '),
-              addressLine1: customer.addressLine1,
-              addressLine2: customer.addressLine2,
-              city: customer.city,
-              county: customer.county,
-              state: customer.state,
-              postalCode: customer.postalCode,
-              country: customer.country,
-              phone: _checkoutPhone,
-              email: email,
-            ),
+      shippingAddress: shippingAddress,
       createdAt: DateTime.now(),
       lines: lines,
     );
@@ -1324,77 +1701,466 @@ class _StoreShellState extends State<StoreShell> {
     try {
       await _gateway.upsertOrder(_orderRow(order));
       await _gateway.insertOrderItems(_orderItemRows(order));
-      if (appliedCoupon != null) {
-        appliedCoupon.used += 1;
-        try {
-          await _gateway.upsertCouponRule(_couponRow(appliedCoupon));
-        } catch (error) {
-          _showStatusSnack(
-            'Order saved, but coupon usage update failed: $error',
-          );
-        }
-      }
     } catch (error) {
       if (mounted) {
         setState(() => _placingOrder = false);
-        _showStatusSnack('Order could not be saved: $error');
       }
+      _showStatusSnack('Order could not be created before payment: $error');
       return;
     }
+
+    late final String redirectUrl;
+    try {
+      final success = Uri.base.replace(
+        path: '/payment-success',
+        queryParameters: {
+          'payment': 'success',
+          'order': order.id,
+          'provider': selectedPaymentMethod.provider.toLowerCase(),
+        },
+      );
+      final failure = Uri.base.replace(
+        path: '/payment-failed',
+        queryParameters: {
+          'payment': 'failed',
+          'order': order.id,
+          'provider': selectedPaymentMethod.provider.toLowerCase(),
+        },
+      );
+      redirectUrl = stripeProvider
+          ? await _gateway.createStripeCheckoutSession(
+              orderNumber: order.id,
+              mode: selectedPaymentMethod.mode,
+              successUrl: success.toString(),
+              cancelUrl: failure.toString(),
+            )
+          : _paymentProcessorUrlForOrder(
+              method: selectedPaymentMethod,
+              checkoutUrl: checkoutUrl,
+              order: order,
+            );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _placingOrder = false);
+      }
+      _showStatusSnack('Could not open payment provider: $error');
+      return;
+    }
+
+    _savePendingCheckoutDraft(order);
     if (!mounted) {
       return;
     }
 
     setState(() {
       _placingOrder = false;
-      for (final line in _cart) {
-        line.product.stock -= line.quantity;
-        line.variant?.stock -= line.quantity;
-        line.product.sold += line.quantity;
+      _pendingPaymentOrderId = order.id;
+      if (!_orders.any((item) => item.id == order.id)) {
+        _orders.insert(0, order);
       }
-      if (customer != null) {
-        customer.orders += 1;
-        customer.lifetimeValue += _cartTotal;
-        if (customer.referralCredits > 0) {
-          customer.referralCredits = math
-              .max(0, customer.referralCredits - 5)
-              .toDouble();
+    });
+    _recordAnalyticsEvent(
+      'add_payment_info',
+      page: StoreView.checkout.name,
+      order: order,
+      metadata: {
+        'provider': selectedPaymentMethod.provider,
+        'mode': selectedPaymentMethod.mode,
+        'items': order.itemCount,
+      },
+    );
+
+    _showStatusSnack('Redirecting to secure payment for order $orderId...');
+    _gateway.redirectBrowserTo(redirectUrl);
+  }
+
+  String _newCheckoutToken() {
+    const chars =
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final random = math.Random.secure();
+    return List.generate(40, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  PaymentMethodConfig? get _selectedPaymentMethod {
+    final enabled = _paymentMethods
+        .where((method) => method.isEnabled)
+        .toList();
+    if (enabled.isEmpty) {
+      return null;
+    }
+    return enabled.firstWhere(
+      (method) => method.provider == _selectedCheckoutPaymentProvider,
+      orElse: () => enabled.first,
+    );
+  }
+
+  String _paymentProcessorUrlForOrder({
+    required PaymentMethodConfig method,
+    required String checkoutUrl,
+    required Order order,
+  }) {
+    final base = Uri.parse(checkoutUrl.trim());
+    final success = Uri.base.replace(
+      path: '/payment-success',
+      queryParameters: {
+        'payment': 'success',
+        'order': order.id,
+        'provider': method.provider.toLowerCase(),
+      },
+    );
+    final failure = Uri.base.replace(
+      path: '/payment-failed',
+      queryParameters: {
+        'payment': 'failed',
+        'order': order.id,
+        'provider': method.provider.toLowerCase(),
+      },
+    );
+    final mergedQuery = <String, String>{
+      ...base.queryParameters,
+      'order_number': order.id,
+      'amount': order.total.toStringAsFixed(2),
+      'currency': 'USD',
+      'customer_email': order.email,
+      'success_url': success.toString(),
+      'cancel_url': failure.toString(),
+      'return_success_url': success.toString(),
+      'return_failure_url': failure.toString(),
+    };
+    return base.replace(queryParameters: mergedQuery).toString();
+  }
+
+  Future<String> _resolveCheckoutUrl(PaymentMethodConfig method) async {
+    final inline = method.checkoutUrl.trim();
+    if (inline.isNotEmpty) {
+      return inline;
+    }
+    try {
+      final credential = await _gateway.fetchPaymentProcessorCredentials(
+        method.provider,
+      );
+      final value = credential?['value'];
+      if (value is Map) {
+        final checkoutUrl = _firstNonEmptyString([
+          value['checkoutUrl'],
+          value['checkout_url'],
+          method.checkoutUrl,
+          method.webhookUrl,
+        ]);
+        return checkoutUrl ?? '';
+      }
+    } catch (_) {}
+    return method.webhookUrl.trim();
+  }
+
+  Future<void> _handlePaymentReturnRoute(String route, StoreView view) async {
+    if (_processingPaymentReturn || !mounted) {
+      return;
+    }
+    if (view != StoreView.paymentSuccess && view != StoreView.paymentFailure) {
+      return;
+    }
+    final uri = Uri.tryParse(route) ?? Uri.base;
+    final orderId = uri.queryParameters['order']?.trim().isNotEmpty == true
+        ? uri.queryParameters['order']!.trim()
+        : _pendingPaymentOrderId;
+    if (orderId.isEmpty) {
+      return;
+    }
+
+    _processingPaymentReturn = true;
+    try {
+      if (view == StoreView.paymentSuccess) {
+        final provider = uri.queryParameters['provider']?.toLowerCase() ?? '';
+        if (provider.contains('stripe')) {
+          await _handleStripePaymentSuccessReturn(orderId);
+          if (mounted) {
+            setState(() {});
+          }
+          return;
         }
+        final existingIndex = _orders.indexWhere(
+          (order) => order.id == orderId,
+        );
+        final draftOrder = _restorePendingCheckoutDraft(orderId);
+        final order = existingIndex != -1 ? _orders[existingIndex] : draftOrder;
+        if (order == null) {
+          throw StateError(
+            'Could not restore the completed order after payment success.',
+          );
+        }
+        final wasPaid = order.financialStatus.toLowerCase() == 'paid';
+        if (existingIndex == -1) {
+          final draftWasSaved = _pendingCheckoutDraftWasSaved(orderId);
+          order
+            ..status = 'Pending'
+            ..financialStatus = 'Paid'
+            ..fulfillmentStatus = 'Pending';
+          await _gateway.upsertOrder(_orderRow(order));
+          if (!draftWasSaved) {
+            await _gateway.insertOrderItems(_orderItemRows(order));
+          }
+          _orders.insert(0, order);
+        } else if (!wasPaid) {
+          order
+            ..status = 'Pending'
+            ..financialStatus = 'Paid'
+            ..fulfillmentStatus = 'Pending';
+          await _gateway.upsertOrder(_orderRow(order));
+        }
+
+        if (!wasPaid) {
+          for (final line in order.lines) {
+            line.product.stock = math.max(
+              0,
+              line.product.stock - line.quantity,
+            );
+            if (line.variant != null) {
+              line.variant!.stock = math.max(
+                0,
+                line.variant!.stock - line.quantity,
+              );
+            }
+            line.product.sold += line.quantity;
+          }
+          try {
+            await _gateway.decrementInventoryForOrder(
+              orderNumber: order.id,
+              email: order.email,
+            );
+          } catch (error) {
+            _showStatusSnack(
+              'Payment succeeded, but inventory update failed: $error',
+            );
+          }
+          await _settlePaidOrderRewards(order);
+          _recordDailyEvent(orders: 1, revenue: order.total);
+          _recordAnalyticsEvent('purchase', page: view.name, order: order);
+          unawaited(_sendOrderEmail(order, 'payment_success'));
+        }
+        order
+          ..status = 'Pending'
+          ..financialStatus = 'Paid'
+          ..fulfillmentStatus = 'Pending';
+        _savePendingCheckoutDraft(order);
+        _lastCompletedOrder = order;
+        unawaited(_gateway.markActiveCartRecovered('CART-$_visitorSessionId'));
+        _cart.clear();
+        _promoCode = '';
+        _appliedCoupon = null;
+        _promoMessage = '';
+        _pendingPaymentOrderId = '';
+      } else {
+        clearPendingCheckoutDraft();
+        final index = _orders.indexWhere((order) => order.id == orderId);
+        if (index != -1) {
+          final order = _orders[index];
+          if (order.status.toLowerCase() != 'cancelled') {
+            order
+              ..status = 'Cancelled'
+              ..financialStatus = 'Unpaid';
+            await _gateway.upsertOrder(_orderRow(order));
+          }
+          unawaited(_sendOrderEmail(order, 'payment_failed'));
+          _recordAnalyticsEvent(
+            'payment_failed',
+            page: view.name,
+            order: order,
+          );
+          final notification = StoreNotification(
+            id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-payment-failed',
+            type: 'payment',
+            title: 'Payment not completed',
+            message:
+                '${order.id} payment was cancelled or failed. Recovery email queued for ${order.email}.',
+            createdAt: DateTime.now(),
+          );
+          _notifications.insert(0, notification);
+          unawaited(_gateway.insertNotification(notification.toRow()));
+        }
+        _pendingPaymentOrderId = '';
       }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (error) {
+      if (mounted) {
+        _showStatusSnack('Payment return handling failed: $error');
+      }
+    } finally {
+      _processingPaymentReturn = false;
+    }
+  }
+
+  Future<void> _handleStripePaymentSuccessReturn(String orderId) async {
+    final existingIndex = _orders.indexWhere((order) => order.id == orderId);
+    final draftOrder = _restorePendingCheckoutDraft(orderId);
+    var order = existingIndex != -1 ? _orders[existingIndex] : draftOrder;
+    final wasPaid = order?.financialStatus.toLowerCase() == 'paid';
+
+    for (var attempt = 0; attempt < 8; attempt += 1) {
+      final liveOrder = await _fetchLiveOrder(orderId);
+      if (liveOrder != null) {
+        order = liveOrder;
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+
+    if (order == null) {
+      throw StateError(
+        'Could not restore the completed order after payment success.',
+      );
+    }
+
+    final index = _orders.indexWhere((item) => item.id == order!.id);
+    if (index == -1) {
       _orders.insert(0, order);
-      _lastCompletedOrder = order;
-      _recordDailyEvent(orders: 1, revenue: _cartTotal);
-      _notifications.insert(
-        0,
-        StoreNotification(
-          id: 'N-${DateTime.now().millisecondsSinceEpoch}',
-          type: 'order',
-          title: 'New purchase',
-          message: '$orderId from $customerName needs fulfillment.',
-          createdAt: DateTime.now(),
-        ),
+    } else {
+      _orders[index] = order;
+    }
+
+    final isPaid = order.financialStatus.toLowerCase() == 'paid';
+    if (isPaid && !wasPaid) {
+      await _settlePaidOrderRewards(order);
+      _recordDailyEvent(orders: 1, revenue: order.total);
+      _recordAnalyticsEvent(
+        'purchase',
+        page: StoreView.paymentSuccess.name,
+        order: order,
       );
-      _notifications.insert(
-        0,
-        StoreNotification(
-          id: 'N-${DateTime.now().millisecondsSinceEpoch}-receipt',
-          type: 'email',
-          title: 'Order confirmation queued',
-          message:
-              'Order received and paid confirmation queued for $email using the Order received template.',
-          createdAt: DateTime.now(),
-        ),
-      );
+      unawaited(_sendOrderEmail(order, 'payment_success'));
+      unawaited(_gateway.markActiveCartRecovered('CART-$_visitorSessionId'));
       _cart.clear();
       _promoCode = '';
       _appliedCoupon = null;
       _promoMessage = '';
-      _view = StoreView.paymentSuccess;
-    });
+    }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Order $orderId placed and admin notified.')),
-    );
+    _savePendingCheckoutDraft(order);
+    _lastCompletedOrder = order;
+    _pendingPaymentOrderId = '';
+  }
+
+  Future<Order?> _fetchLiveOrder(String orderId) async {
+    try {
+      final rows = await _gateway.fetchOrders();
+      for (final row in rows) {
+        final id = '${row['order_number'] ?? row['id']}'.trim();
+        if (id == orderId) {
+          return Order.fromRow(row);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  void _savePendingCheckoutDraft(Order order) {
+    final row = _orderRow(order);
+    row['created_at'] = order.createdAt?.toIso8601String();
+    savePendingCheckoutDraft({
+      'order': row,
+      'order_items': _orderItemRows(order),
+      'admin_order_saved': true,
+    });
+  }
+
+  bool _pendingCheckoutDraftWasSaved(String orderId) {
+    final draft = loadPendingCheckoutDraft();
+    if (draft == null) {
+      return false;
+    }
+    final orderRow = draft['order'];
+    if (orderRow is! Map) {
+      return false;
+    }
+    final draftOrderId = '${orderRow['order_number'] ?? orderRow['id'] ?? ''}'
+        .trim();
+    return draftOrderId == orderId && draft['admin_order_saved'] == true;
+  }
+
+  Order? _restorePendingCheckoutDraft(String orderId) {
+    final draft = loadPendingCheckoutDraft();
+    if (draft == null) {
+      return null;
+    }
+    final orderRow = draft['order'];
+    final orderItems = draft['order_items'];
+    if (orderRow is! Map) {
+      return null;
+    }
+    final row = Map<String, dynamic>.from(orderRow.cast<String, dynamic>());
+    final draftOrderId = '${row['order_number'] ?? row['id'] ?? ''}'.trim();
+    if (draftOrderId != orderId) {
+      return null;
+    }
+    row['order_items'] = orderItems is List
+        ? orderItems
+              .whereType<Map>()
+              .map((item) => item.cast<String, dynamic>())
+              .toList()
+        : const <Map<String, dynamic>>[];
+    return Order.fromRow(row);
+  }
+
+  Order? _restoreAnyPendingCheckoutDraft() {
+    final draft = loadPendingCheckoutDraft();
+    if (draft == null) {
+      return null;
+    }
+    final orderRow = draft['order'];
+    final orderItems = draft['order_items'];
+    if (orderRow is! Map) {
+      return null;
+    }
+    final row = Map<String, dynamic>.from(orderRow.cast<String, dynamic>());
+    row['order_items'] = orderItems is List
+        ? orderItems
+              .whereType<Map>()
+              .map((item) => item.cast<String, dynamic>())
+              .toList()
+        : const <Map<String, dynamic>>[];
+    return Order.fromRow(row);
+  }
+
+  Order? _paymentReturnOrderForCurrentRoute() {
+    final route = currentBrowserRoute();
+    final isSuccessRoute =
+        _viewForBrowserRoute(route) == StoreView.paymentSuccess;
+    Order? successAware(Order? order) {
+      if (!isSuccessRoute || order == null) {
+        return order;
+      }
+      return order
+        ..status = 'Pending'
+        ..financialStatus = 'Paid'
+        ..fulfillmentStatus = 'Pending';
+    }
+
+    if (_lastCompletedOrder != null) {
+      return successAware(_lastCompletedOrder);
+    }
+    final uri = Uri.tryParse(route) ?? Uri.base;
+    final routeOrderId = uri.queryParameters['order']?.trim() ?? '';
+    if (routeOrderId.isNotEmpty) {
+      final index = _orders.indexWhere((order) => order.id == routeOrderId);
+      if (index != -1) {
+        return successAware(_orders[index]);
+      }
+      final draftOrder = _restorePendingCheckoutDraft(routeOrderId);
+      if (draftOrder != null) {
+        return successAware(draftOrder);
+      }
+    }
+    if (_pendingPaymentOrderId.isNotEmpty) {
+      final index = _orders.indexWhere(
+        (order) => order.id == _pendingPaymentOrderId,
+      );
+      if (index != -1) {
+        return successAware(_orders[index]);
+      }
+    }
+    return successAware(_restoreAnyPendingCheckoutDraft());
   }
 
   List<Map<String, dynamic>> _orderItemRows(Order order) {
@@ -1402,7 +2168,9 @@ class _StoreShellState extends State<StoreShell> {
       for (final line in order.lines)
         {
           'order_id': order.id,
+          'checkout_token': order.checkoutToken,
           'product_id': line.product.id,
+          'variant_id': line.variant?.id,
           'sku': line.sku,
           'product_name': line.product.name,
           'size': line.size,
@@ -1425,7 +2193,7 @@ class _StoreShellState extends State<StoreShell> {
   }) async {
     final review = ReviewSummary(
       id: DateTime.now().millisecondsSinceEpoch,
-      scope: 'company',
+      scope: 'Company',
       author: anonymous ? 'Verified customer' : order.customer,
       rating: rating.toDouble(),
       title: title.trim().isEmpty ? 'Verified purchase review' : title.trim(),
@@ -1450,7 +2218,22 @@ class _StoreShellState extends State<StoreShell> {
     } catch (error) {
       _showStatusSnack('Review saved, but survey details failed: $error');
     }
+    _recordAnalyticsEvent(
+      'generate_lead',
+      page: StoreView.paymentSuccess.name,
+      order: order,
+      metadata: {
+        'lead_type': 'post_purchase_survey',
+        'rating': rating,
+        'would_recommend': wouldRecommend,
+      },
+    );
+    clearPendingCheckoutDraft();
+    replaceBrowserRoute('/');
     setState(() {
+      _view = StoreView.shop;
+      _lastBrowserRoute = '/';
+      _lastCompletedOrder = null;
       _companyReviews.insert(0, review);
       _notifications.insert(
         0,
@@ -1468,9 +2251,30 @@ class _StoreShellState extends State<StoreShell> {
   Future<void> _createAccount(
     String name,
     String email,
-    String password,
-  ) async {
+    String password, {
+    ShippingAddress? shippingAddress,
+    bool stayOnCheckout = false,
+  }) async {
     final cleanEmail = email.trim().toLowerCase();
+    final emailError = Validators.validateEmail(cleanEmail);
+    if (emailError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(emailError)));
+      }
+      return;
+    }
+    if (password.trim().length < 6) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Password must be at least 6 characters.'),
+          ),
+        );
+      }
+      return;
+    }
     CustomerAccount? existing;
     for (final customer in _customers) {
       if (customer.email == cleanEmail) {
@@ -1493,6 +2297,13 @@ class _StoreShellState extends State<StoreShell> {
       referralCode: cleanEmail.split('@').first.toUpperCase(),
       referralCredits: 0,
       isNew: true,
+      addressLine1: shippingAddress?.addressLine1 ?? '',
+      addressLine2: shippingAddress?.addressLine2 ?? '',
+      city: shippingAddress?.city ?? '',
+      county: shippingAddress?.county ?? '',
+      state: shippingAddress?.state ?? '',
+      postalCode: shippingAddress?.postalCode ?? '',
+      country: shippingAddress?.country ?? 'US',
     );
 
     CustomerAccount account = created;
@@ -1523,8 +2334,81 @@ class _StoreShellState extends State<StoreShell> {
         _customers.insert(0, account);
         _recordDailyEvent(newUsers: 1);
       }
-      _view = StoreView.account;
+      _view = stayOnCheckout ? StoreView.checkout : StoreView.account;
+      _checkoutEmail = account.email;
+      _checkoutShippingAddress = ShippingAddress(
+        firstName: shippingAddress?.firstName ?? account.name.split(' ').first,
+        lastName:
+            shippingAddress?.lastName ??
+            account.name.split(' ').skip(1).join(' '),
+        addressLine1: shippingAddress?.addressLine1 ?? account.addressLine1,
+        addressLine2: shippingAddress?.addressLine2 ?? account.addressLine2,
+        city: shippingAddress?.city ?? account.city,
+        county: shippingAddress?.county ?? account.county,
+        state: shippingAddress?.state ?? account.state,
+        postalCode: shippingAddress?.postalCode ?? account.postalCode,
+        country: shippingAddress?.country ?? account.country,
+        phone: _checkoutPhone,
+        email: account.email,
+      );
     });
+    if (stayOnCheckout && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Account created. Your checkout details are still editable.',
+          ),
+        ),
+      );
+    }
+    unawaited(_saveWishlistForCustomer(account));
+    _syncActiveCart();
+  }
+
+  Future<void> _createCheckoutAccount(String password) async {
+    if (_currentCustomer != null || _creatingCheckoutAccount) {
+      return;
+    }
+    final name =
+        '${_checkoutShippingAddress.firstName} ${_checkoutShippingAddress.lastName}'
+            .trim();
+    if (name.isEmpty || _checkoutEmail.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter your name and email in checkout before creating an account.',
+          ),
+        ),
+      );
+      return;
+    }
+    final shippingAddress = ShippingAddress(
+      firstName: _checkoutShippingAddress.firstName,
+      lastName: _checkoutShippingAddress.lastName,
+      addressLine1: _checkoutShippingAddress.addressLine1,
+      addressLine2: _checkoutShippingAddress.addressLine2,
+      city: _checkoutShippingAddress.city,
+      county: _checkoutShippingAddress.county,
+      state: _checkoutShippingAddress.state,
+      postalCode: _checkoutShippingAddress.postalCode,
+      country: _checkoutShippingAddress.country,
+      phone: _checkoutPhone,
+      email: _checkoutEmail.trim(),
+    );
+    setState(() => _creatingCheckoutAccount = true);
+    try {
+      await _createAccount(
+        name,
+        _checkoutEmail.trim(),
+        password,
+        shippingAddress: shippingAddress,
+        stayOnCheckout: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _creatingCheckoutAccount = false);
+      }
+    }
   }
 
   Future<void> _login(String email, String password) async {
@@ -1557,6 +2441,33 @@ class _StoreShellState extends State<StoreShell> {
       _accountStartsCreating = false;
       _view = StoreView.account;
     });
+    await _loadWishlistForCustomer(match);
+    _syncActiveCart();
+  }
+
+  Future<void> _loadWishlistForCustomer(CustomerAccount customer) async {
+    try {
+      final rows = await _gateway.fetchWishlist(customer.email);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _wishlistProductIds
+          ..clear()
+          ..addAll(rows.map((row) => _asInt(row['product_id'])));
+      });
+    } catch (_) {
+      // Wishlist should never block sign-in or checkout.
+    }
+  }
+
+  Future<void> _saveWishlistForCustomer(CustomerAccount customer) async {
+    for (final productId in _wishlistProductIds) {
+      await _gateway.addWishlistItem(
+        email: customer.email,
+        productId: productId,
+      );
+    }
   }
 
   Future<void> _loginWithOAuth(String provider) async {
@@ -1575,6 +2486,7 @@ class _StoreShellState extends State<StoreShell> {
     setState(() {
       _currentCustomer = null;
       _accountStartsCreating = false;
+      _wishlistProductIds.clear();
     });
   }
 
@@ -1608,6 +2520,9 @@ class _StoreShellState extends State<StoreShell> {
       _adminPreviewMode = true;
       _view = StoreView.admin;
     });
+    if (match != null) {
+      unawaited(_loadStoreData());
+    }
   }
 
   void _logoutBackendUser() {
@@ -1620,13 +2535,33 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   void _toggleFavorite(Fragrance product) {
+    final customer = _currentCustomer;
+    final willRemove = _wishlistProductIds.contains(product.id);
     setState(() {
-      if (_wishlistProductIds.contains(product.id)) {
+      if (willRemove) {
         _wishlistProductIds.remove(product.id);
       } else {
         _wishlistProductIds.add(product.id);
       }
     });
+    if (customer == null) {
+      _showStatusSnack('Sign in or create an account to save wishlist items.');
+      return;
+    }
+    final action = willRemove
+        ? _gateway.removeWishlistItem(
+            email: customer.email,
+            productId: product.id,
+          )
+        : _gateway.addWishlistItem(
+            email: customer.email,
+            productId: product.id,
+          );
+    unawaited(
+      action.catchError(
+        (Object error) => _showStatusSnack('Wishlist save failed: $error'),
+      ),
+    );
   }
 
   void _submitProductReview(
@@ -1692,6 +2627,13 @@ class _StoreShellState extends State<StoreShell> {
         _products[index] = product;
       }
     });
+    _recordAdminAudit(
+      action: 'upsert',
+      entityType: 'product',
+      entityId: '${product.id}',
+      summary: 'Product saved: ${product.name}',
+      metadata: {'sku': product.sku, 'stock': product.stock},
+    );
   }
 
   Future<void> _autoApproveProductNotes(Fragrance product) async {
@@ -1831,14 +2773,45 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   Future<void> _updateOrder(Order order) async {
+    final existingIndex = _orders.indexWhere((item) => item.id == order.id);
+    final previous = existingIndex == -1
+        ? null
+        : _orders[existingIndex].fulfillmentStatus;
     setState(() {
-      final index = _orders.indexWhere((item) => item.id == order.id);
-      if (index != -1) {
-        _orders[index] = order;
+      if (existingIndex != -1) {
+        _orders[existingIndex] = order;
       }
     });
     try {
       await _gateway.upsertOrder(_orderRow(order));
+      if (_normalizeFinancialStatus(order.financialStatus) == 'refunded' ||
+          order.returnRestocked) {
+        try {
+          await _gateway.restockInventoryForOrder(
+            orderNumber: order.id,
+            email: order.email,
+          );
+        } catch (error) {
+          _showStatusSnack('Order saved, but inventory restock failed: $error');
+        }
+      }
+      final event =
+          _emailEventForFulfillmentChange(previous, order.fulfillmentStatus) ??
+          _emailEventForFulfillmentChange(null, order.fulfillmentStatus);
+      if (event != null) {
+        unawaited(_sendOrderEmail(order, event));
+      }
+      _recordAdminAudit(
+        action: 'update',
+        entityType: 'order',
+        entityId: order.id,
+        summary:
+            'Order updated: ${order.status}, ${order.financialStatus}, ${order.fulfillmentStatus}',
+        metadata: {
+          'return_status': order.returnStatus,
+          'refund_status': order.refundStatus,
+        },
+      );
       _showStatusSnack('Order saved.');
     } catch (error) {
       _showStatusSnack('Order save failed: $error');
@@ -1856,11 +2829,16 @@ class _StoreShellState extends State<StoreShell> {
         order
           ..fulfillmentStatus = fulfillmentStatus
           ..labelStatus = labelStatus
-          ..status = fulfillmentStatus == 'Sent'
+          ..status =
+              fulfillmentStatus == 'Sent' || fulfillmentStatus == 'Shipped'
               ? 'Shipped'
-              : fulfillmentStatus == 'Being picked'
-              ? 'Picking'
-              : order.status;
+              : fulfillmentStatus;
+        final event = fulfillmentStatus == 'Label created'
+            ? null
+            : _emailEventForFulfillmentChange(null, fulfillmentStatus);
+        if (event != null) {
+          unawaited(_sendOrderEmail(order, event));
+        }
         _notifications.insert(
           0,
           StoreNotification(
@@ -1890,14 +2868,32 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   Map<String, dynamic> _orderRow(Order order) {
+    final status = _normalizeOrderStatus(order.status);
+    final financialStatus = _normalizeFinancialStatus(order.financialStatus);
+    final fulfillmentStatus = _normalizeFulfillmentStatus(
+      order.fulfillmentStatus,
+    );
+    final trackingNumber = order.trackingNumber.trim();
+    final trackingStatus = order.trackingStatus.trim().isNotEmpty
+        ? order.trackingStatus.trim()
+        : trackingNumber.isEmpty
+        ? ''
+        : 'Tracking available';
+    final trackingUrl = order.trackingUrl.trim().isNotEmpty
+        ? order.trackingUrl.trim()
+        : _trackingUrlForCarrier(
+            carrier: order.shippingCarrier,
+            trackingNumber: trackingNumber,
+          );
     return {
       'id': order.id,
       'order_number': order.id,
       'customer_name': order.customer,
       'email': order.email,
-      'status': order.status,
-      'financial_status': order.financialStatus,
-      'fulfillment_status': order.fulfillmentStatus,
+      'checkout_token': order.checkoutToken,
+      'status': status,
+      'financial_status': financialStatus,
+      'fulfillment_status': fulfillmentStatus,
       'subtotal': order.subtotal,
       'discount_total': order.discountTotal,
       'tax_total': order.taxBreakdown.fold(
@@ -1911,10 +2907,68 @@ class _StoreShellState extends State<StoreShell> {
       'shipping_carrier': order.shippingCarrier,
       'shipping_service': order.shippingService,
       'shipping_priority': order.shippingPriority,
-      'tracking_number': order.trackingNumber,
+      'tracking_number': trackingNumber,
+      'tracking_status': trackingStatus,
+      'tracking_url': trackingUrl,
+      'tracking_last_checked_at': order.trackingLastCheckedAt
+          ?.toUtc()
+          .toIso8601String(),
       'label_status': order.labelStatus,
-      'tax_breakdown': order.taxBreakdown.map((line) => line.toRow()).toList(),
+      'refund_status': order.refundStatus,
+      'refund_total': order.refundTotal,
+      'refund_reference': order.refundReference,
+      'refund_reason': order.refundReason,
+      'refunded_at': order.refundedAt?.toUtc().toIso8601String(),
+      'return_status': order.returnStatus,
+      'return_reason': order.returnReason,
+      'return_restocked': order.returnRestocked,
+      'returned_at': order.returnedAt?.toUtc().toIso8601String(),
       'shipping_address': order.shippingAddress.toJson(),
+    };
+  }
+
+  String _normalizeOrderStatus(String value) {
+    final clean = value.trim().toLowerCase();
+    return switch (clean) {
+      'pending' => 'pending',
+      'paid' => 'paid',
+      'invoice created' => 'invoice_created',
+      'packing' => 'packing',
+      'picking' || 'being picked' => 'picking',
+      'label printed' || 'label created' || 'label_created' => 'label_created',
+      'shipped' || 'sent' => 'shipped',
+      'cancelled' => 'cancelled',
+      'refunded' => 'refunded',
+      _ => 'pending',
+    };
+  }
+
+  String _normalizeFinancialStatus(String value) {
+    final clean = value.trim().toLowerCase();
+    return switch (clean) {
+      'unpaid' => 'unpaid',
+      'authorized' => 'authorized',
+      'paid' => 'paid',
+      'partially refunded' || 'partially_refunded' => 'partially_refunded',
+      'refunded' => 'refunded',
+      'voided' => 'voided',
+      _ => 'unpaid',
+    };
+  }
+
+  String _normalizeFulfillmentStatus(String value) {
+    final clean = value.trim().toLowerCase();
+    return switch (clean) {
+      'pending' || 'unfulfilled' => 'Pending',
+      'processing' => 'Processing',
+      'invoice created' || 'invoice_created' => 'Invoice created',
+      'being picked' || 'picking' => 'Being picked',
+      'packing' => 'Packing',
+      'label printed' || 'label created' || 'label_created' => 'Label created',
+      'sent' || 'shipped' => 'Shipped',
+      'delivered' => 'Delivered',
+      'cancelled' => 'Cancelled',
+      _ => 'Pending',
     };
   }
 
@@ -1951,52 +3005,153 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   Future<ShippingLabelResult> _createShippingLabel(Order order) async {
-    final result = await _gateway.createUspsLabel(
-      order: _orderRow(order),
-      storeInfo: _storeInfo.toRow(),
-      package: _packageRowForOrder(order),
-    );
-    downloadBase64File(
-      fileName: result.labelFileName,
-      base64Contents: result.labelBase64,
-      mimeType: result.labelContentType,
-    );
-    setState(() {
-      order
-        ..trackingNumber = result.trackingNumber
-        ..labelStatus = result.labelStatus
-        ..fulfillmentStatus = 'Label created'
-        ..status = 'Label created'
-        ..shippingCarrier = 'USPS';
-      if (result.postage > 0) {
-        order.shippingTotal = result.postage;
-      }
-      if (result.estimatedDays.trim().isNotEmpty) {
-        _notifications.insert(
-          0,
-          StoreNotification(
-            id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-label',
-            type: 'shipping',
-            title: 'USPS label created',
-            message:
-                '${order.id} label created for ${result.trackingNumber} (${result.estimatedDays}).',
-            createdAt: DateTime.now(),
-          ),
+    try {
+      if (_orderBlocksFulfillment(order)) {
+        throw StateError(
+          'This order is cancelled or refunded and cannot be fulfilled.',
         );
       }
-    });
-    await _gateway.upsertOrder(_orderRow(order));
-    return result;
+      _validateShippingAddressForLabel(order);
+      final carrier = order.shippingCarrier.trim().isEmpty
+          ? 'USPS'
+          : order.shippingCarrier.trim().toUpperCase();
+      final credentials = _shippingCredentials[carrier];
+      final result = (credentials?.isConfigured ?? false)
+          ? await _gateway.createShippingLabel(
+              carrier: carrier,
+              order: _orderRow(order),
+              storeInfo: _storeInfo.toRow(),
+              package: _packageRowForOrder(order),
+            )
+          : _createAddressOnlyLabel(order, carrier);
+
+      if (result.labelBase64.isNotEmpty) {
+        downloadBase64File(
+          fileName: result.labelFileName,
+          base64Contents: result.labelBase64,
+          mimeType: result.labelContentType,
+        );
+      }
+      setState(() {
+        final trackingUrl = _trackingUrlForCarrier(
+          carrier: carrier,
+          trackingNumber: result.trackingNumber,
+        );
+        order
+          ..trackingNumber = result.trackingNumber
+          ..trackingStatus = result.trackingNumber.trim().isEmpty
+              ? 'Tracking pending'
+              : 'Label created'
+          ..trackingUrl = trackingUrl
+          ..trackingLastCheckedAt = DateTime.now()
+          ..labelStatus = 'Label created'
+          ..fulfillmentStatus = 'Label created'
+          ..status = 'Label created'
+          ..shippingCarrier = carrier;
+        if (result.postage > 0) {
+          order.shippingTotal = result.postage;
+        }
+        if (result.estimatedDays.trim().isNotEmpty) {
+          _notifications.insert(
+            0,
+            StoreNotification(
+              id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-label',
+              type: 'shipping',
+              title: '$carrier label created',
+              message: result.trackingNumber.trim().isNotEmpty
+                  ? '${order.id} $carrier label created for ${result.trackingNumber} (${result.estimatedDays}).'
+                  : '${order.id} address label created (${result.estimatedDays}).',
+              createdAt: DateTime.now(),
+            ),
+          );
+        }
+      });
+      await _gateway.upsertOrder(_orderRow(order));
+      unawaited(_sendOrderEmail(order, 'label_created'));
+      return result;
+    } catch (error) {
+      final notification = StoreNotification(
+        id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-label-failed',
+        type: 'shipping',
+        title: 'Label creation failed',
+        message: '${order.id} label creation failed: $error',
+        createdAt: DateTime.now(),
+      );
+      if (mounted) {
+        setState(() => _notifications.insert(0, notification));
+      }
+      unawaited(_gateway.insertNotification(notification.toRow()));
+      rethrow;
+    }
+  }
+
+  bool _orderBlocksFulfillment(Order order) {
+    final status = order.status.trim().toLowerCase();
+    final financial = order.financialStatus.trim().toLowerCase();
+    final fulfillment = order.fulfillmentStatus.trim().toLowerCase();
+    return status == 'cancelled' ||
+        status == 'refunded' ||
+        financial == 'refunded' ||
+        fulfillment == 'cancelled';
+  }
+
+  void _validateShippingAddressForLabel(Order order) {
+    final address = order.shippingAddress;
+    final recipient = [
+      address.firstName,
+      address.lastName,
+    ].where((value) => value.trim().isNotEmpty).join(' ').trim();
+    if ((recipient.isEmpty && order.customer.trim().isEmpty) ||
+        address.addressLine1.trim().isEmpty ||
+        address.city.trim().isEmpty ||
+        address.state.trim().isEmpty ||
+        address.postalCode.trim().isEmpty ||
+        address.country.trim().isEmpty) {
+      throw StateError(
+        'Shipping label requires recipient name, street, city, state, postal code, and country.',
+      );
+    }
+  }
+
+  String _trackingUrlForCarrier({
+    required String carrier,
+    required String trackingNumber,
+  }) {
+    final tracking = trackingNumber.trim();
+    if (tracking.isEmpty) {
+      return '';
+    }
+    final encoded = Uri.encodeComponent(tracking);
+    return switch (carrier.trim().toUpperCase()) {
+      'UPS' => 'https://www.ups.com/track?tracknum=$encoded',
+      'FEDEX' => 'https://www.fedex.com/fedextrack/?trknbr=$encoded',
+      'DHL' =>
+        'https://www.dhl.com/us-en/home/tracking/tracking-express.html?submit=1&tracking-id=$encoded',
+      _ => 'https://tools.usps.com/go/TrackConfirmAction?tLabels=$encoded',
+    };
+  }
+
+  ShippingLabelResult _createAddressOnlyLabel(Order order, String carrier) {
+    final title = 'Address label ${order.id}';
+    printHtmlDocument(title, _addressLabelHtml(order, carrier, _storeInfo));
+    return const ShippingLabelResult(
+      trackingNumber: '',
+      labelStatus: 'Label created',
+      labelFileName: '',
+      labelContentType: 'text/html',
+      labelBase64: '',
+      estimatedDays: 'Address label only (no postage)',
+      postage: 0,
+    );
   }
 
   Map<String, dynamic> _reviewRow(ReviewSummary review) {
     return {
-      'id': '${review.id}',
       'scope': review.scope,
       'product_id': review.productId,
       'customer_email': review.customerEmail,
       'author': review.author,
-      'rating': review.rating,
+      'rating': review.rating.round().clamp(1, 5),
       'title': review.title,
       'body': review.body,
       'status': review.status,
@@ -2016,6 +3171,8 @@ class _StoreShellState extends State<StoreShell> {
       'buy_quantity': coupon.buyQuantity,
       'get_quantity': coupon.getQuantity,
       'get_price': coupon.getPrice,
+      'remaining_balance': coupon.remainingBalance,
+      'recipient_email': coupon.recipientEmail,
       'starts_on': coupon.starts,
       'ends_on': coupon.ends,
       'is_active': coupon.isActive,
@@ -2034,7 +3191,8 @@ class _StoreShellState extends State<StoreShell> {
       'mode': method.mode,
       'public_key': method.publicKey,
       'merchant_id': method.merchantId,
-      'webhook_url': method.webhookUrl,
+      // Stored in the existing webhook_url column for backward compatibility.
+      'webhook_url': method.checkoutUrl,
       'statement_descriptor': method.statementDescriptor,
     };
   }
@@ -2091,23 +3249,234 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   void _sendCustomerEmail(String audience, String subject, String body) {
-    setState(() {
-      _notifications.insert(
-        0,
-        StoreNotification(
-          id: 'N-${DateTime.now().millisecondsSinceEpoch}',
-          type: 'email',
-          title: 'Email queued',
-          message: '$subject queued for $audience.',
-          createdAt: DateTime.now(),
-        ),
+    unawaited(_sendManualCustomerEmail(audience, subject, body));
+  }
+
+  Future<void> _sendManualCustomerEmail(
+    String audience,
+    String subject,
+    String body,
+  ) async {
+    final recipients = _emailRecipientsForAudience(audience);
+    if (recipients.isEmpty) {
+      _showStatusSnack('No email recipients found for $audience.');
+      return;
+    }
+    try {
+      await _gateway.sendEmail(
+        kind: 'manual',
+        recipients: recipients,
+        subject: subject.trim().isEmpty ? 'EgbeAnom update' : subject.trim(),
+        htmlBody: body,
+        textBody: _plainTextFromHtml(body),
       );
+      _recordEmailNotification(
+        title: 'Email sent',
+        message: '$subject sent to ${recipients.length} recipient(s).',
+      );
+      _showStatusSnack('Email sent to ${recipients.length} recipient(s).');
+    } catch (error) {
+      _recordEmailNotification(
+        title: 'Email failed',
+        message: '$subject failed for $audience: $error',
+      );
+      _showStatusSnack('Email send failed: $error');
+    }
+  }
+
+  List<String> _emailRecipientsForAudience(String audience) {
+    final cleanAudience = audience.trim().toLowerCase();
+    Iterable<CustomerAccount> matches;
+    if (cleanAudience == 'all customers') {
+      matches = _customers;
+    } else if (cleanAudience == 'vip customers') {
+      matches = _customers.where(
+        (customer) => customer.segment.toLowerCase().contains('vip'),
+      );
+    } else if (cleanAudience == 'new customers') {
+      matches = _customers.where((customer) => customer.isNew);
+    } else {
+      matches = _customers.where(
+        (customer) => customer.email.toLowerCase() == cleanAudience,
+      );
+    }
+    return matches
+        .map((customer) => customer.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  Future<void> _sendOrderEmail(Order order, String event) async {
+    if (order.email.trim().isEmpty) {
+      return;
+    }
+    final subject = _orderEmailSubject(order, event);
+    final htmlBody = _orderEmailHtml(order, event);
+    try {
+      await _gateway.sendEmail(
+        kind: 'order_event',
+        recipients: [order.email.trim().toLowerCase()],
+        subject: subject,
+        htmlBody: htmlBody,
+        textBody: _plainTextFromHtml(htmlBody),
+        orderId: order.id,
+        event: event,
+      );
+      _recordEmailNotification(
+        title: 'Customer email sent',
+        message: '$subject sent to ${order.email}.',
+      );
+    } catch (error) {
+      _recordEmailNotification(
+        title: 'Customer email failed',
+        message: '$subject failed for ${order.email}: $error',
+      );
+    }
+  }
+
+  String? _emailEventForFulfillmentChange(String? previous, String current) {
+    final before = _normalizeFulfillmentStatus(previous ?? '').toLowerCase();
+    final after = _normalizeFulfillmentStatus(current).toLowerCase();
+    if (before == after) {
+      return null;
+    }
+    return switch (after) {
+      'processing' => 'processing',
+      'label created' => 'label_created',
+      'shipped' => 'sent',
+      _ => null,
+    };
+  }
+
+  String _orderEmailSubject(Order order, String event) {
+    return switch (event) {
+      'payment_success' => 'Your EgbeAnom invoice for order ${order.id}',
+      'payment_failed' => 'Your EgbeAnom payment was not completed',
+      'processing' => 'Your EgbeAnom order is being prepared',
+      'label_created' => 'Your EgbeAnom shipping label is ready',
+      'sent' => 'Your EgbeAnom order is on the way',
+      _ => 'EgbeAnom order update ${order.id}',
+    };
+  }
+
+  String _orderEmailHtml(Order order, String event) {
+    final escapedOrderId = htmlEscape.convert(order.id);
+    final tracking = order.trackingNumber.trim().isEmpty
+        ? 'Tracking will be shared as soon as it is available.'
+        : '${htmlEscape.convert(order.shippingCarrier)} ${htmlEscape.convert(order.trackingNumber)}';
+    final intro = switch (event) {
+      'payment_success' =>
+        'Thank you for your purchase. Your payment was received and your invoice is below.',
+      'payment_failed' =>
+        'Your payment was not completed. You can return to your cart and try another payment method when you are ready.',
+      'processing' => 'Your order is now being picked and packed with care.',
+      'label_created' =>
+        'Your shipping label has been created. Tracking information is below.',
+      'sent' => 'Your order has been marked as sent and is on the way.',
+      _ => 'Your order has been updated.',
+    };
+    final rows = order.lines.isEmpty
+        ? '<tr><td>EgbeAnom order</td><td>${order.itemCount}</td><td>${currency(order.total)}</td></tr>'
+        : order.lines
+              .map(
+                (line) =>
+                    '<tr><td>${htmlEscape.convert(line.product.name)} ${htmlEscape.convert(line.size)}</td><td>${line.quantity}</td><td>${currency(line.total)}</td></tr>',
+              )
+              .join();
+    final tax = _orderTaxTotal(order);
+    return '''
+<html>
+  <body style="margin:0;padding:0;background:#f7f2e8;color:#121212;font-family:Arial,sans-serif;">
+    <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #b7892f;">
+      <div style="padding:28px 34px;border-bottom:3px solid #d3a13c;">
+        <h1 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-weight:400;font-size:34px;">EgbeAnom Fragrance</h1>
+        <p style="margin:8px 0 0;color:#333;">Where Elegance Speaks. Scents Last Forever.</p>
+      </div>
+      <div style="padding:28px 34px;">
+        <h2 style="margin:0 0 10px;color:#b8842b;text-transform:uppercase;">Order $escapedOrderId</h2>
+        <p style="font-size:16px;line-height:1.45;">$intro</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:18px;">
+          <thead>
+            <tr>
+              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Item</th>
+              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Qty</th>
+              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Total</th>
+            </tr>
+          </thead>
+          <tbody>$rows</tbody>
+        </table>
+        <div style="margin-top:18px;border:1px solid #d8bd80;padding:14px;">
+          <div><strong>Subtotal:</strong> ${currency(order.subtotal)}</div>
+          ${order.discountTotal > 0 ? '<div><strong>Discount:</strong> -${currency(order.discountTotal)}</div>' : ''}
+          <div><strong>Shipping:</strong> ${currency(order.shippingTotal)}</div>
+          <div><strong>Tax:</strong> ${currency(tax)}</div>
+          <div style="font-size:20px;margin-top:8px;"><strong>Total:</strong> ${currency(order.total)}</div>
+        </div>
+        ${(event == 'label_created' || event == 'sent') ? '<p style="margin-top:18px;"><strong>Tracking:</strong> $tracking</p>' : ''}
+      </div>
+      <div style="padding:18px 34px;border-top:1px solid #d8bd80;color:#555;font-size:13px;">
+        Thank you for choosing EgbeAnom.
+      </div>
+    </div>
+  </body>
+</html>
+''';
+  }
+
+  String _plainTextFromHtml(String html) {
+    return html
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n\n')
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  void _recordEmailNotification({
+    required String title,
+    required String message,
+  }) {
+    if (!mounted) {
+      return;
+    }
+    final notification = StoreNotification(
+      id: 'N-${DateTime.now().millisecondsSinceEpoch}-email',
+      type: 'email',
+      title: title,
+      message: message,
+      createdAt: DateTime.now(),
+    );
+    setState(() {
+      _notifications.insert(0, notification);
     });
+    unawaited(_gateway.insertNotification(notification.toRow()));
+  }
+
+  void _recordAdminAudit({
+    required String action,
+    required String entityType,
+    required String entityId,
+    required String summary,
+    Map<String, dynamic> metadata = const {},
+  }) {
+    unawaited(
+      _gateway
+          .insertAdminAuditLog({
+            'action': action,
+            'entity_type': entityType,
+            'entity_id': entityId,
+            'summary': summary,
+            'metadata': metadata,
+          })
+          .catchError((_) {}),
+    );
   }
 
   Future<void> _updateEmailSettings(EmailServerSettings settings) async {
     setState(() {
       _emailSettings
+        ..provider = settings.provider
         ..fromName = settings.fromName
         ..fromEmail = settings.fromEmail
         ..imapHost = settings.imapHost
@@ -2115,10 +3484,17 @@ class _StoreShellState extends State<StoreShell> {
         ..smtpHost = settings.smtpHost
         ..smtpPort = settings.smtpPort
         ..username = settings.username
+        ..password = settings.password
         ..useSsl = settings.useSsl;
     });
     try {
       await _gateway.upsertEmailServerSettings(_emailSettings.toJson());
+      _recordAdminAudit(
+        action: 'update',
+        entityType: 'email_settings',
+        entityId: _emailSettings.provider,
+        summary: 'Email SMTP settings updated',
+      );
       _showStatusSnack('Email settings saved.');
     } catch (error) {
       _showStatusSnack('Email settings save failed: $error');
@@ -2136,6 +3512,12 @@ class _StoreShellState extends State<StoreShell> {
       await _gateway.upsertShippingCarrierCredentialsForCarrier(
         carrier,
         credentials.toJson(),
+      );
+      _recordAdminAudit(
+        action: 'update',
+        entityType: 'shipping_credentials',
+        entityId: carrier,
+        summary: '$carrier shipping credentials updated',
       );
       _showStatusSnack('$carrier credentials saved.');
     } catch (error) {
@@ -2226,6 +3608,13 @@ class _StoreShellState extends State<StoreShell> {
         'last_login_ip': user.lastLoginIp,
         'blocked_reason': user.blockedReason,
       });
+      _recordAdminAudit(
+        action: 'upsert',
+        entityType: 'backend_user',
+        entityId: user.id,
+        summary: 'Backend user saved: ${user.email}',
+        metadata: {'role': user.role, 'is_active': user.isActive},
+      );
       _showStatusSnack('Backend user saved.');
     } catch (error) {
       _showStatusSnack('Backend user save failed: $error');
@@ -2233,6 +3622,26 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   Future<void> _upsertCustomer(CustomerAccount customer) async {
+    final emailError = Validators.validateEmail(customer.email);
+    if (emailError != null) {
+      _showStatusSnack('Customer save failed: $emailError');
+      return;
+    }
+    if (customer.addressLine1.trim().isNotEmpty ||
+        customer.city.trim().isNotEmpty ||
+        customer.state.trim().isNotEmpty ||
+        customer.postalCode.trim().isNotEmpty) {
+      final addressError = Validators.validateAddress(
+        customer.addressLine1,
+        customer.city,
+        customer.state,
+        customer.postalCode,
+      );
+      if (addressError != null) {
+        _showStatusSnack('Customer save failed: $addressError');
+        return;
+      }
+    }
     setState(() {
       final index = _customers.indexWhere((item) => item.id == customer.id);
       if (index == -1) {
@@ -2243,6 +3652,12 @@ class _StoreShellState extends State<StoreShell> {
     });
     try {
       await _gateway.upsertCustomer(customer.toRow());
+      _recordAdminAudit(
+        action: 'upsert',
+        entityType: 'customer',
+        entityId: customer.id,
+        summary: 'Customer saved: ${customer.email}',
+      );
       _showStatusSnack('Customer saved.');
     } catch (error) {
       _showStatusSnack('Customer save failed: $error');
@@ -2311,6 +3726,7 @@ class _StoreShellState extends State<StoreShell> {
       product.isActive = false;
       _cart.removeWhere((line) => line.product.id == product.id);
     });
+    _syncActiveCart();
     try {
       await _gateway.deleteProduct(product.id);
       _showStatusSnack('Fragrance deleted.');
@@ -2434,6 +3850,12 @@ class _StoreShellState extends State<StoreShell> {
       _showStatusSnack(
         '${method.name} ${method.isEnabled ? 'enabled' : 'disabled'}.',
       );
+      _recordAdminAudit(
+        action: 'toggle',
+        entityType: 'payment_method',
+        entityId: method.provider,
+        summary: '${method.name} ${method.isEnabled ? 'enabled' : 'disabled'}',
+      );
     } catch (error) {
       _showStatusSnack('Payment method update failed: $error');
     }
@@ -2456,8 +3878,15 @@ class _StoreShellState extends State<StoreShell> {
         'publicKey': method.publicKey,
         'merchantId': method.merchantId,
         'apiSecret': method.apiSecret,
+        'checkoutUrl': method.checkoutUrl,
         'webhookUrl': method.webhookUrl,
       });
+      _recordAdminAudit(
+        action: 'upsert',
+        entityType: 'payment_settings',
+        entityId: method.provider,
+        summary: 'Payment method saved: ${method.name}',
+      );
       _showStatusSnack('Payment method saved.');
     } catch (error) {
       _showStatusSnack('Payment method save failed: $error');
@@ -2481,6 +3910,12 @@ class _StoreShellState extends State<StoreShell> {
     });
     try {
       await _gateway.upsertShippingOption(option.toRow());
+      _recordAdminAudit(
+        action: 'upsert',
+        entityType: 'shipping_option',
+        entityId: option.id,
+        summary: 'Shipping option saved: ${option.name}',
+      );
       _showStatusSnack('Shipping option saved.');
     } catch (error) {
       _showStatusSnack('Shipping option save failed: $error');
@@ -2497,6 +3932,12 @@ class _StoreShellState extends State<StoreShell> {
     });
     try {
       await _gateway.deleteShippingOption(option.id);
+      _recordAdminAudit(
+        action: 'delete',
+        entityType: 'shipping_option',
+        entityId: option.id,
+        summary: 'Shipping option deleted: ${option.name}',
+      );
       _showStatusSnack('Shipping option deleted.');
     } catch (error) {
       _showStatusSnack('Shipping option delete failed: $error');
@@ -2506,6 +3947,12 @@ class _StoreShellState extends State<StoreShell> {
   Future<void> _saveStoreInfo(StoreInfo info) async {
     setState(() => _storeInfo = info);
     await _gateway.upsertStoreInfo(info.toRow());
+    _recordAdminAudit(
+      action: 'update',
+      entityType: 'store_info',
+      entityId: 'primary',
+      summary: 'Store information updated',
+    );
   }
 
   Future<String> _uploadStoreAsset(UploadedImageFile file) {
@@ -2527,6 +3974,12 @@ class _StoreShellState extends State<StoreShell> {
       _taxRules.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     });
     await _gateway.upsertTaxRule(rule.toRow());
+    _recordAdminAudit(
+      action: 'upsert',
+      entityType: 'tax_rule',
+      entityId: rule.id,
+      summary: 'Tax rule saved: ${rule.name}',
+    );
   }
 
   Future<void> _deleteTaxRule(TaxRule rule) async {
@@ -2534,6 +3987,12 @@ class _StoreShellState extends State<StoreShell> {
       _taxRules.removeWhere((item) => item.id == rule.id);
     });
     await _gateway.deleteTaxRule(rule.id);
+    _recordAdminAudit(
+      action: 'delete',
+      entityType: 'tax_rule',
+      entityId: rule.id,
+      summary: 'Tax rule deleted: ${rule.name}',
+    );
   }
 
   Future<void> _upsertContent(ContentBlock block) async {
@@ -2745,16 +4204,21 @@ class _StoreShellState extends State<StoreShell> {
           checkoutEmail: _checkoutEmail,
           checkoutPhone: _checkoutPhone,
           shippingAddress: _checkoutShippingAddress,
-          onCheckoutEmailChanged: (value) =>
-              setState(() => _checkoutEmail = value),
-          onCheckoutPhoneChanged: (value) =>
-              setState(() => _checkoutPhone = value),
+          onCheckoutEmailChanged: (value) {
+            setState(() => _checkoutEmail = value);
+            _syncActiveCart();
+          },
+          onCheckoutPhoneChanged: (value) {
+            setState(() => _checkoutPhone = value);
+            _syncActiveCart();
+          },
           onShippingAddressChanged: (value) {
             setState(() => _checkoutShippingAddress = value);
+            _syncActiveCart();
             unawaited(_refreshSelectedShippingRate());
           },
           onPromoCodeChanged: (value) => setState(() => _promoCode = value),
-          onApplyPromoCode: _applyPromoCode,
+          onApplyPromoCode: () => unawaited(_applyPromoCode()),
           onRemovePromoCode: _removePromoCode,
           shippingOptions: _enabledShippingOptions,
           selectedShippingOptionId: _selectedShippingOptionId,
@@ -2764,9 +4228,16 @@ class _StoreShellState extends State<StoreShell> {
           },
           onBackToCart: () => setState(() => _view = StoreView.cart),
           onPlaceOrder: () => unawaited(_checkout()),
+          onCreateAccountFromCheckout: _currentCustomer == null
+              ? (password) => _createCheckoutAccount(password)
+              : null,
+          creatingAccount: _creatingCheckoutAccount,
           paymentMethods: _paymentMethods
               .where((method) => method.isEnabled)
               .toList(),
+          selectedPaymentProvider: _selectedCheckoutPaymentProvider,
+          onPaymentProviderChanged: (provider) =>
+              setState(() => _selectedCheckoutPaymentProvider = provider),
         ),
       ),
       StoreView.account => _storefrontGate(
@@ -2821,7 +4292,9 @@ class _StoreShellState extends State<StoreShell> {
                       minutesAgo: 0,
                       lines: _cart,
                     ),
-                  ..._marketplaceCarts,
+                  ..._marketplaceCarts.where(
+                    (cart) => cart.id != 'CART-$_visitorSessionId',
+                  ),
                 ],
                 customers: _customers,
                 dailyMetrics: _dailyMetrics,
@@ -2843,6 +4316,7 @@ class _StoreShellState extends State<StoreShell> {
                 measurementSystem: _siteStatus.measurementSystem,
                 backendUsers: _backendUsers,
                 activeUserSessions: _activeUserSessions,
+                analyticsEvents: _analyticsEvents,
                 emailSettings: _emailSettings,
                 onSave: _upsertProduct,
                 onRemove: _removeProduct,
@@ -2877,7 +4351,7 @@ class _StoreShellState extends State<StoreShell> {
           isSuccess: true,
           onContinueShopping: () => setState(() => _view = StoreView.shop),
           onViewAccount: () => setState(() => _view = StoreView.account),
-          completedOrder: _lastCompletedOrder,
+          completedOrder: _paymentReturnOrderForCurrentRoute(),
           onSubmitSurvey: _submitCompanySurvey,
         ),
       ),

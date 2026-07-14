@@ -221,7 +221,11 @@ class CheckoutView extends StatelessWidget {
     required this.onShippingOptionChanged,
     required this.onBackToCart,
     required this.onPlaceOrder,
+    required this.creatingAccount,
+    this.onCreateAccountFromCheckout,
     required this.paymentMethods,
+    required this.selectedPaymentProvider,
+    required this.onPaymentProviderChanged,
   });
 
   final List<CartLine> lines;
@@ -248,7 +252,11 @@ class CheckoutView extends StatelessWidget {
   final ValueChanged<String> onShippingOptionChanged;
   final VoidCallback onBackToCart;
   final VoidCallback onPlaceOrder;
+  final bool creatingAccount;
+  final Future<void> Function(String password)? onCreateAccountFromCheckout;
   final List<PaymentMethodConfig> paymentMethods;
+  final String selectedPaymentProvider;
+  final ValueChanged<String> onPaymentProviderChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -290,6 +298,13 @@ class CheckoutView extends StatelessWidget {
                             onEmailChanged: onCheckoutEmailChanged,
                             onPhoneChanged: onCheckoutPhoneChanged,
                           ),
+                          if (onCreateAccountFromCheckout != null) ...[
+                            const SizedBox(height: 14),
+                            _CheckoutCreateAccountCard(
+                              creating: creatingAccount,
+                              onCreateAccount: onCreateAccountFromCheckout!,
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           _CheckoutAddressForms(
                             shippingAddress: shippingAddress,
@@ -341,7 +356,11 @@ class CheckoutView extends StatelessWidget {
                             title: 'Payment',
                             icon: Icons.payments_outlined,
                             children: [
-                              _CheckoutPaymentOptions(methods: paymentMethods),
+                              _CheckoutPaymentOptions(
+                                methods: paymentMethods,
+                                selectedProvider: selectedPaymentProvider,
+                                onProviderChanged: onPaymentProviderChanged,
+                              ),
                             ],
                           ),
                         ],
@@ -688,10 +707,81 @@ class _CheckoutContactSectionState extends State<_CheckoutContactSection> {
   }
 }
 
+class _CheckoutCreateAccountCard extends StatefulWidget {
+  const _CheckoutCreateAccountCard({
+    required this.creating,
+    required this.onCreateAccount,
+  });
+
+  final bool creating;
+  final Future<void> Function(String password) onCreateAccount;
+
+  @override
+  State<_CheckoutCreateAccountCard> createState() =>
+      _CheckoutCreateAccountCardState();
+}
+
+class _CheckoutCreateAccountCardState
+    extends State<_CheckoutCreateAccountCard> {
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _CheckoutSection(
+      title: 'Save your info',
+      icon: Icons.person_add_alt_outlined,
+      children: [
+        const Text(
+          'Want an account? Make one here and keep your checkout details editable.',
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _passwordController,
+          decoration: const InputDecoration(
+            labelText: 'Create a password',
+            prefixIcon: Icon(Icons.lock_outline),
+            helperText: 'Use at least 6 characters.',
+          ),
+          obscureText: true,
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: widget.creating
+              ? null
+              : () => widget.onCreateAccount(_passwordController.text),
+          icon: widget.creating
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.person_add_alt_1_outlined),
+          label: Text(
+            widget.creating
+                ? 'Creating account'
+                : 'Create account from checkout',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _CheckoutPaymentOptions extends StatefulWidget {
-  const _CheckoutPaymentOptions({required this.methods});
+  const _CheckoutPaymentOptions({
+    required this.methods,
+    required this.selectedProvider,
+    required this.onProviderChanged,
+  });
 
   final List<PaymentMethodConfig> methods;
+  final String selectedProvider;
+  final ValueChanged<String> onProviderChanged;
 
   @override
   State<_CheckoutPaymentOptions> createState() =>
@@ -699,8 +789,6 @@ class _CheckoutPaymentOptions extends StatefulWidget {
 }
 
 class _CheckoutPaymentOptionsState extends State<_CheckoutPaymentOptions> {
-  String? _selected;
-
   @override
   Widget build(BuildContext context) {
     final methods = widget.methods;
@@ -710,7 +798,10 @@ class _CheckoutPaymentOptionsState extends State<_CheckoutPaymentOptions> {
       );
     }
 
-    final selected = _selected ?? methods.first.provider;
+    final selected =
+        methods.any((item) => item.provider == widget.selectedProvider)
+        ? widget.selectedProvider
+        : methods.first.provider;
     final method = methods.firstWhere(
       (item) => item.provider == selected,
       orElse: () => methods.first,
@@ -732,7 +823,11 @@ class _CheckoutPaymentOptionsState extends State<_CheckoutPaymentOptions> {
                 child: Text('${method.name} • ${method.mode}'),
               ),
           ],
-          onChanged: (value) => setState(() => _selected = value),
+          onChanged: (value) {
+            if (value != null) {
+              widget.onProviderChanged(value);
+            }
+          },
         ),
         const SizedBox(height: 8),
         _ProviderPaymentFields(method: method),
@@ -749,6 +844,20 @@ class _ProviderPaymentFields extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = method.provider.toLowerCase();
+    if (provider.contains('stripe')) {
+      return Card(
+        margin: EdgeInsets.zero,
+        color: const Color(0xFFF6F7F9),
+        child: const ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          leading: Icon(Icons.lock_outline),
+          title: Text('Card details are entered on Stripe'),
+          subtitle: Text(
+            'After you place the order, you will be redirected to Stripe to enter card information securely. This site does not store your card number, expiration date, or CVC.',
+          ),
+        ),
+      );
+    }
     if (provider.contains('paypal')) {
       return const TextField(
         decoration: InputDecoration(
@@ -926,16 +1035,7 @@ class CheckoutReviewPanel extends StatelessWidget {
             const Divider(height: 24),
             _PriceRow(label: 'Subtotal', value: subtotal),
             if (discount > 0) _PriceRow(label: 'Discount', value: -discount),
-            if (taxBreakdown.isEmpty)
-              _PriceRow(label: 'Estimated tax', value: tax)
-            else ...[
-              for (final line in taxBreakdown)
-                _PriceRow(
-                  label:
-                      '${line.jurisdiction} tax (${(line.rate * 100).toStringAsFixed(3)}%)',
-                  value: line.amount,
-                ),
-            ],
+            _PriceRow(label: 'Estimated tax', value: tax),
             _PriceRow(label: 'Shipping', value: shipping),
             const Divider(height: 28),
             _PriceRow(label: 'Total', value: total, emphasized: true),
@@ -1006,12 +1106,12 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
     return TextField(
       controller: _controller,
       decoration: InputDecoration(
-        labelText: 'Promotional code',
-        prefixIcon: const Icon(Icons.sell_outlined),
+        labelText: 'Promo, gift card, referral, or LOYALTY code',
+        prefixIcon: const Icon(Icons.card_giftcard_outlined),
         suffixIcon: widget.appliedCouponCode.isEmpty
             ? null
             : IconButton(
-                tooltip: 'Remove promotional code',
+                tooltip: 'Remove code',
                 onPressed: widget.onRemove,
                 icon: const Icon(Icons.close),
               ),
@@ -1151,10 +1251,15 @@ class PaymentReturnView extends StatelessWidget {
                         completedOrder != null &&
                         onSubmitSurvey != null) ...[
                       const SizedBox(height: 18),
+                      _PaymentSuccessOrderDetails(order: completedOrder!),
+                      const SizedBox(height: 18),
                       _PostPurchaseSurvey(
                         order: completedOrder!,
                         onSubmit: onSubmitSurvey!,
                       ),
+                    ] else if (isSuccess) ...[
+                      const SizedBox(height: 18),
+                      const _PaymentSuccessMissingOrder(),
                     ],
                   ],
                 ),
@@ -1162,6 +1267,149 @@ class PaymentReturnView extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PaymentSuccessMissingOrder extends StatelessWidget {
+  const _PaymentSuccessMissingOrder();
+
+  @override
+  Widget build(BuildContext context) {
+    final uri = Uri.base;
+    final orderId = uri.queryParameters['order']?.trim() ?? '';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4E5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE1A23A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Order details are still loading',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            orderId.isEmpty
+                ? 'No order id was returned in the payment success URL, so the survey cannot be shown yet.'
+                : 'Returned order id: $orderId. If this message stays visible, the order was not restored from the checkout return.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentSuccessOrderDetails extends StatelessWidget {
+  const _PaymentSuccessOrderDetails({required this.order});
+
+  final Order order;
+
+  @override
+  Widget build(BuildContext context) {
+    final taxTotal = _orderTaxTotal(order);
+    final address = order.shippingAddress;
+    final shipTo = [
+      [
+        address.firstName,
+        address.lastName,
+      ].where((item) => item.trim().isNotEmpty).join(' '),
+      address.addressLine1,
+      address.addressLine2,
+      [
+        address.city,
+        address.state,
+        address.postalCode,
+      ].where((item) => item.trim().isNotEmpty).join(', '),
+      address.country,
+    ].where((item) => item.trim().isNotEmpty).join('\n');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F2E8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFD7C09A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Order ${order.id}',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Text('${order.customer} • ${order.email}'),
+          if (shipTo.isNotEmpty) ...[const SizedBox(height: 8), Text(shipTo)],
+          const Divider(height: 22),
+          Wrap(
+            spacing: 14,
+            runSpacing: 8,
+            children: [
+              _OrderDetailPill(label: 'Status', value: order.status),
+              _OrderDetailPill(label: 'Payment', value: order.financialStatus),
+              _OrderDetailPill(
+                label: 'Fulfillment',
+                value: order.fulfillmentStatus,
+              ),
+              _OrderDetailPill(label: 'Items', value: '${order.itemCount}'),
+              _OrderDetailPill(
+                label: 'Shipping',
+                value: currency(order.shippingTotal),
+              ),
+              _OrderDetailPill(label: 'Tax', value: currency(taxTotal)),
+              _OrderDetailPill(label: 'Total', value: currency(order.total)),
+            ],
+          ),
+          if (order.lines.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final line in order.lines)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${line.quantity} x ${line.product.name} ${line.size}',
+                      ),
+                    ),
+                    Text(currency(line.total)),
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _OrderDetailPill extends StatelessWidget {
+  const _OrderDetailPill({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE0D3BC)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+          Text(value),
+        ],
       ),
     );
   }
@@ -1312,560 +1560,6 @@ class _PostPurchaseSurveyState extends State<_PostPurchaseSurvey> {
   }
 }
 
-String _storeAddress(StoreInfo storeInfo) {
-  return [
-    storeInfo.addressLine1,
-    storeInfo.addressLine2,
-    [
-      storeInfo.city,
-      storeInfo.state,
-      storeInfo.postalCode,
-    ].where((item) => item.trim().isNotEmpty).join(', '),
-    storeInfo.country,
-  ].where((item) => item.trim().isNotEmpty).join('<br>');
-}
-
-String _orderDate(Order order) {
-  final value = order.createdAt ?? DateTime.now();
-  final month = value.month.toString().padLeft(2, '0');
-  final day = value.day.toString().padLeft(2, '0');
-  return '$month/$day/${value.year}';
-}
-
-double _orderTaxTotal(Order order) {
-  if (order.taxBreakdown.isNotEmpty) {
-    return order.taxBreakdown.fold(0, (sum, line) => sum + line.amount);
-  }
-  final lineSubtotal = order.lines.fold<double>(
-    0,
-    (total, line) => total + line.total,
-  );
-  final subtotal = order.subtotal > 0 ? order.subtotal : lineSubtotal;
-  return math.max(
-    0,
-    order.total -
-        order.shippingTotal -
-        math.max(0, subtotal - order.discountTotal),
-  );
-}
-
-const String _siteQrImageUrl = 'assets/assets/images/egbeanom_qr_code.png';
-const String _siteQrLabel = 'egbeanom.com';
-
-String _siteQrImage() =>
-    '<img src="$_siteQrImageUrl" alt="EgbeAnom website QR code">';
-
-String _invoiceHtml(
-  Order order,
-  StoreInfo storeInfo, {
-  bool printLite = false,
-}) {
-  final storeName = htmlEscape.convert(storeInfo.displayName);
-  final address = _storeAddress(storeInfo);
-  final contact =
-      [
-            storeInfo.email,
-            storeInfo.phone,
-            if (storeInfo.fax.isNotEmpty) 'Fax: ${storeInfo.fax}',
-          ]
-          .where((item) => item.trim().isNotEmpty)
-          .map(htmlEscape.convert)
-          .join('<br>');
-  final lineSubtotal = order.lines.fold<double>(
-    0,
-    (total, line) => total + line.total,
-  );
-  final subtotal = order.subtotal > 0 ? order.subtotal : lineSubtotal;
-  final discount = order.discountTotal;
-  final tax = _orderTaxTotal(order);
-  final taxSummary = order.taxBreakdown.isEmpty
-      ? '<div><strong>TAX</strong><span>${currency(tax)}</span></div>'
-      : order.taxBreakdown
-            .map(
-              (line) =>
-                  '<div><strong>${htmlEscape.convert(line.jurisdiction.toUpperCase())} TAX</strong><span>${currency(line.amount)}</span></div>',
-            )
-            .join();
-  final rows = order.lines.isEmpty
-      ? '''
-        <tr>
-          <td class="item-photo"></td>
-          <td><strong>Order item</strong><br><em>EgbeAnom Fragrance</em></td>
-          <td>${order.itemCount}</td>
-          <td>${currency(math.max(0, subtotal - discount))}</td>
-          <td>${currency(math.max(0, subtotal - discount))}</td>
-        </tr>
-      '''
-      : order.lines
-            .map(
-              (line) =>
-                  '''
-        <tr>
-          <td class="item-photo">${line.product.primaryPhotoUrl.trim().isEmpty ? '' : '<img src="${htmlEscape.convert(line.product.primaryPhotoUrl)}" alt="${htmlEscape.convert(line.product.name)}">'}</td>
-          <td>
-            <strong>${htmlEscape.convert(line.product.name)}</strong><br>
-            <em>${htmlEscape.convert(line.product.concentration)}</em><br>
-            <span>${htmlEscape.convert(line.sku)} • ${htmlEscape.convert(line.size)}</span>
-          </td>
-          <td>${line.quantity}</td>
-          <td>${currency(line.unitPrice)}</td>
-          <td>${currency(line.total)}</td>
-        </tr>
-      ''',
-            )
-            .join();
-  final due =
-      order.createdAt?.add(const Duration(days: 14)) ??
-      DateTime.now().add(const Duration(days: 14));
-  final logo = storeInfo.logoUrl.trim().isEmpty
-      ? '<div class="invoice-logo-mark">EgbeAnom<br><span>Fragrance</span></div>'
-      : '<img class="invoice-logo-img" src="${htmlEscape.convert(storeInfo.logoUrl)}" alt="EgbeAnom Fragrance">';
-  return '''
-<section class="egbeanom-print-page invoice-doc">
-  <style>
-    .invoice-doc { font-family: Georgia, 'Times New Roman', serif; color: #121212; max-width: 940px; margin: 0 auto; background: #fff; border: 1px solid #b7892f; }
-    .invoice-top { background: #050505; color: #f5d27a; padding: 34px 46px; display: grid; grid-template-columns: 240px 1fr 260px; gap: 34px; align-items: center; border-bottom: 14px solid #d3a13c; }
-    .invoice-logo-img { width: 210px; height: 210px; object-fit: contain; border-radius: 999px; }
-    .invoice-logo-mark { width: 210px; height: 210px; border: 3px solid #bd8a2d; border-radius: 999px; display: grid; place-items: center; text-align: center; font-size: 34px; line-height: 1; box-shadow: inset 0 0 0 4px #111; }
-    .invoice-logo-mark span { font-size: 16px; letter-spacing: 8px; text-transform: uppercase; }
-    .invoice-brand h1 { margin: 0; font-size: 54px; font-weight: 400; }
-    .invoice-brand .spaced { letter-spacing: 12px; text-transform: uppercase; font-size: 25px; }
-    .invoice-brand p { color: #fff; font-size: 20px; text-align: center; margin: 18px 0 0; line-height: 1.35; }
-    .invoice-meta { border-left: 1px solid #936e2a; padding-left: 36px; }
-    .invoice-meta h2 { margin: 0 0 22px; font-size: 54px; letter-spacing: 4px; font-weight: 500; }
-    .invoice-meta-grid { display: grid; grid-template-columns: 110px 1fr; gap: 12px 20px; color: #fff; font-family: Arial, sans-serif; font-size: 18px; }
-    .invoice-meta-grid strong { color: #d3a13c; text-transform: uppercase; }
-    .invoice-addresses { padding: 48px 64px 34px; display: grid; grid-template-columns: 1fr 1px 1fr; gap: 46px; align-items: start; }
-    .gold-title { color: #b8842b; text-transform: uppercase; letter-spacing: 1px; font: 700 22px Arial, sans-serif; margin-bottom: 14px; }
-    .divider-vertical { width: 1px; min-height: 180px; background: #caa45c; }
-    .invoice-addresses p { margin: 0; font-size: 18px; line-height: 1.45; }
-    .contact-line { display: grid; grid-template-columns: 34px 1fr; gap: 12px; margin-bottom: 16px; font-size: 18px; line-height: 1.35; }
-    .contact-line b { color: #b8842b; font-size: 24px; text-align: center; }
-    .invoice-table-wrap { padding: 0 46px 18px; position: relative; }
-    .invoice-table-wrap:before { content: 'EgbeAnom'; position: absolute; inset: 40px 0 auto; text-align: center; font-size: 96px; color: rgba(184,132,43,.08); pointer-events: none; }
-    .invoice-items { width: 100%; border-collapse: collapse; position: relative; z-index: 1; font-family: Arial, sans-serif; }
-    .invoice-items th { background: #050505; color: #d3a13c; padding: 14px; font-size: 15px; text-transform: uppercase; border-right: 1px solid #caa45c; }
-    .invoice-items td { border: 1px solid #d8bd80; padding: 14px; vertical-align: middle; font-size: 16px; }
-    .invoice-items em { font-family: Georgia, serif; }
-    .invoice-items span { color: #555; font-size: 12px; }
-    .item-photo { width: 78px; text-align: center; }
-    .item-photo img { width: 54px; height: 68px; object-fit: cover; }
-    .invoice-lower { display: grid; grid-template-columns: 1fr 360px; gap: 44px; padding: 14px 46px 30px; align-items: end; }
-    .thank-you { font-size: 20px; }
-    .thank-you .script { color: #c28d2e; font-size: 38px; font-style: italic; display: block; margin-bottom: 8px; }
-    .invoice-summary { font-family: Arial, sans-serif; }
-    .invoice-summary div { display: flex; justify-content: space-between; padding: 14px 28px; border: 1px solid #d8bd80; border-bottom: 0; font-size: 17px; }
-    .invoice-summary .grand { background: #050505; color: #d3a13c; border: 1px solid #d8bd80; font-size: 30px; font-weight: 700; }
-    .invoice-footer { background: #fbf8f0; border-top: 1px solid #d8bd80; padding: 28px 70px 34px; display: grid; grid-template-columns: 1fr 1fr 120px; gap: 34px; align-items: center; font-family: Arial, sans-serif; }
-    .invoice-footer-title { color: #b8842b; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; }
-    .invoice-qr { width: 96px; height: 96px; border: 4px solid #111; box-sizing: border-box; background: #fff; padding: 4px; margin-left: auto; }
-    .invoice-qr img { display: block; width: 100%; height: 100%; object-fit: contain; }
-    ${printLite ? '.invoice-top { background: #fff; color: #111; border-bottom-width: 2px; } .invoice-brand p, .invoice-meta-grid { color: #111; } .invoice-logo-mark { box-shadow: none; }' : ''}
-    @media print {
-      .invoice-doc {
-        width: 8.5in !important;
-        height: 11in !important;
-        max-width: none !important;
-        margin: 0 !important;
-        border-width: 1px !important;
-        box-sizing: border-box !important;
-        overflow: hidden !important;
-      }
-      .invoice-top {
-        padding: .18in .28in !important;
-        grid-template-columns: 1.18in 1fr 1.75in !important;
-        gap: .22in !important;
-        border-bottom-width: .08in !important;
-      }
-      .invoice-logo-img,
-      .invoice-logo-mark {
-        width: 1.05in !important;
-        height: 1.05in !important;
-      }
-      .invoice-logo-mark {
-        font-size: 16pt !important;
-        border-width: 2px !important;
-      }
-      .invoice-logo-mark span {
-        font-size: 6pt !important;
-        letter-spacing: 2px !important;
-      }
-      .invoice-brand h1 {
-        font-size: 26pt !important;
-        line-height: 1 !important;
-      }
-      .invoice-brand .spaced {
-        font-size: 10pt !important;
-        letter-spacing: 4px !important;
-      }
-      .invoice-brand p {
-        font-size: 9pt !important;
-        margin-top: .08in !important;
-      }
-      .invoice-meta {
-        padding-left: .18in !important;
-      }
-      .invoice-meta h2 {
-        font-size: 24pt !important;
-        margin-bottom: .12in !important;
-      }
-      .invoice-meta-grid {
-        grid-template-columns: .66in 1fr !important;
-        gap: .04in .08in !important;
-        font-size: 8.5pt !important;
-      }
-      .invoice-addresses {
-        padding: .22in .34in .14in !important;
-        gap: .22in !important;
-      }
-      .gold-title {
-        font-size: 11pt !important;
-        margin-bottom: .06in !important;
-      }
-      .divider-vertical {
-        min-height: .78in !important;
-      }
-      .invoice-addresses p,
-      .contact-line {
-        font-size: 8.5pt !important;
-        line-height: 1.25 !important;
-      }
-      .contact-line {
-        grid-template-columns: .18in 1fr !important;
-        gap: .06in !important;
-        margin-bottom: .06in !important;
-      }
-      .contact-line b {
-        font-size: 11pt !important;
-      }
-      .invoice-table-wrap {
-        padding: 0 .28in .1in !important;
-      }
-      .invoice-table-wrap:before {
-        font-size: 42pt !important;
-        inset: .3in 0 auto !important;
-      }
-      .invoice-items th {
-        padding: .06in !important;
-        font-size: 7.5pt !important;
-      }
-      .invoice-items td {
-        padding: .055in !important;
-        font-size: 8pt !important;
-        line-height: 1.18 !important;
-      }
-      .invoice-items span {
-        font-size: 6.5pt !important;
-      }
-      .item-photo {
-        width: .48in !important;
-      }
-      .item-photo img {
-        width: .32in !important;
-        height: .42in !important;
-      }
-      .invoice-lower {
-        grid-template-columns: 1fr 2.35in !important;
-        gap: .18in !important;
-        padding: .06in .28in .12in !important;
-      }
-      .thank-you {
-        font-size: 9pt !important;
-      }
-      .thank-you .script {
-        font-size: 20pt !important;
-        margin-bottom: .03in !important;
-      }
-      .invoice-summary div {
-        padding: .055in .1in !important;
-        font-size: 8.5pt !important;
-      }
-      .invoice-summary .grand {
-        font-size: 14pt !important;
-      }
-      .invoice-footer {
-        padding: .12in .35in !important;
-        grid-template-columns: 1fr 1fr .65in !important;
-        gap: .14in !important;
-        font-size: 8pt !important;
-      }
-      .invoice-footer-title {
-        margin-bottom: .04in !important;
-      }
-      .invoice-qr {
-        width: .58in !important;
-        height: .58in !important;
-        border-width: 2px !important;
-        padding: .025in !important;
-      }
-      .invoice-qr img {
-        width: 100% !important;
-        height: 100% !important;
-      }
-    }
-  </style>
-  <div class="invoice-top">
-    <div>$logo</div>
-    <div class="invoice-brand">
-      <h1>$storeName</h1>
-      <div class="spaced">Fragrance</div>
-      <p>Where Elegance Speaks.<br>Scents Last Forever.</p>
-    </div>
-    <div class="invoice-meta">
-      <h2>INVOICE</h2>
-      <div class="invoice-meta-grid">
-        <strong>Invoice #</strong><span>${htmlEscape.convert(order.id)}</span>
-        <strong>Date</strong><span>${_orderDate(order)}</span>
-        <strong>Due Date</strong><span>${due.month}/${due.day}/${due.year}</span>
-      </div>
-    </div>
-  </div>
-  <div class="invoice-addresses">
-    <div>
-      <div class="gold-title">Bill To:</div>
-      <p><strong>${htmlEscape.convert(order.customer)}</strong><br>${htmlEscape.convert(order.email)}<br>${htmlEscape.convert(order.shippingCarrier)} ${htmlEscape.convert(order.shippingService)}</p>
-    </div>
-    <div class="divider-vertical"></div>
-    <div>
-      <div class="contact-line"><b>•</b><span><strong>$storeName</strong><br>$address</span></div>
-      <div class="contact-line"><b>☎</b><span>${htmlEscape.convert(storeInfo.phone.isEmpty ? 'Phone not set' : storeInfo.phone)}</span></div>
-      <div class="contact-line"><b>✉</b><span>${htmlEscape.convert(storeInfo.email.isEmpty ? 'Email not set' : storeInfo.email)}</span></div>
-      <div class="contact-line"><b>◎</b><span>www.egbeanom.com</span></div>
-    </div>
-  </div>
-  <div class="invoice-table-wrap">
-    <table class="invoice-items">
-      <thead>
-        <tr><th></th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
-      </thead>
-      <tbody>$rows</tbody>
-    </table>
-  </div>
-  <div class="invoice-lower">
-    <div class="thank-you"><span class="script">Thank you</span>for choosing EgbeAnom Fragrance.</div>
-    <div class="invoice-summary">
-      <div><strong>SUBTOTAL</strong><span>${currency(subtotal)}</span></div>
-      ${discount > 0 ? '<div><strong>DISCOUNT${order.couponCode.isEmpty ? '' : ' (${htmlEscape.convert(order.couponCode)})'}</strong><span>-${currency(discount)}</span></div>' : ''}
-      <div><strong>SHIPPING</strong><span>${currency(order.shippingTotal)}</span></div>
-      $taxSummary
-      <div class="grand"><span>TOTAL</span><span>${currency(order.total)}</span></div>
-    </div>
-  </div>
-  <div class="invoice-footer">
-    <div><div class="invoice-footer-title">Customer Support</div>$contact</div>
-    <div><div class="invoice-footer-title">Follow Us</div>@egbeanom.fragrance</div>
-    <div class="invoice-qr">${_siteQrImage()}</div>
-  </div>
-</section>
-''';
-}
-
-String _packListHtml(Order order, StoreInfo storeInfo) {
-  final rows = order.lines.isEmpty
-      ? '<tr><td>Order record item count</td><td>${order.itemCount}</td><td></td><td></td></tr>'
-      : order.lines
-            .map(
-              (line) =>
-                  '''
-        <tr>
-          <td>${htmlEscape.convert(line.product.name)}<br><span>${htmlEscape.convert(line.sku)} • ${htmlEscape.convert(line.size)}</span></td>
-          <td>${line.quantity}</td>
-          <td>${htmlEscape.convert(line.product.itemLocation.isEmpty ? 'No location' : line.product.itemLocation)}</td>
-          <td>${htmlEscape.convert(line.product.shippingSize(MeasurementSystem.standard))}</td>
-        </tr>
-      ''',
-            )
-            .join();
-  return '''
-<section class="egbeanom-print-page pack-list-doc">
-  <style>
-    .pack-list-doc { font-family: Arial, sans-serif; color: #111; max-width: 820px; margin: 0 auto; padding: 28px; box-sizing: border-box; }
-    .pick-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 3px solid #111; padding-bottom: 14px; margin-bottom: 18px; }
-    .pick-head h1 { margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-    .pick-meta { display: flex; align-items: center; gap: 16px; text-align: right; }
-    .pack-qr-wrap { text-align: center; font-size: 10px; color: #333; }
-    .pack-qr { width: 82px; height: 82px; border: 1px solid #111; box-sizing: border-box; background: #fff; padding: 4px; }
-    .pack-qr img { display: block; width: 100%; height: 100%; object-fit: contain; }
-    .pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
-    .pick-box { border: 1px solid #bbb; padding: 12px; min-height: 82px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 18px; }
-    th { background: #111; color: #fff; text-align: left; padding: 9px; }
-    td { border-bottom: 1px solid #ddd; padding: 10px 9px; vertical-align: top; }
-    td span { color: #555; font-size: 12px; }
-    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 34px; }
-    .sig { border-top: 1px solid #111; padding-top: 8px; }
-    @media print {
-      .pack-list-doc {
-        width: 8.5in !important;
-        height: 11in !important;
-        max-width: none !important;
-        margin: 0 !important;
-        padding: .34in !important;
-        overflow: hidden !important;
-      }
-      .pick-head {
-        padding-bottom: .12in !important;
-        margin-bottom: .16in !important;
-        gap: .16in !important;
-      }
-      .pick-head h1 {
-        font-size: 21pt !important;
-      }
-      .pick-meta {
-        gap: .12in !important;
-      }
-      .pack-qr-wrap {
-        font-size: 6pt !important;
-      }
-      .pack-qr {
-        width: .62in !important;
-        height: .62in !important;
-        padding: .025in !important;
-      }
-      .pick-grid {
-        gap: .12in !important;
-        margin-bottom: .14in !important;
-      }
-      .pick-box {
-        min-height: .68in !important;
-        padding: .1in !important;
-        font-size: 9pt !important;
-        line-height: 1.25 !important;
-      }
-      table {
-        margin-top: .12in !important;
-        font-size: 8.5pt !important;
-      }
-      th {
-        padding: .06in !important;
-      }
-      td {
-        padding: .055in .06in !important;
-        line-height: 1.18 !important;
-      }
-      td span {
-        font-size: 7pt !important;
-      }
-      .signatures {
-        margin-top: .25in !important;
-        gap: .24in !important;
-        font-size: 9pt !important;
-      }
-    }
-  </style>
-  <div class="pick-head">
-    <div>
-      <h1>Pack List</h1>
-      <strong>${htmlEscape.convert(storeInfo.displayName)}</strong>
-    </div>
-    <div class="pick-meta">
-      <div>
-        <strong>${htmlEscape.convert(order.id)}</strong><br>
-        ${_orderDate(order)}<br>
-        ${htmlEscape.convert(order.shippingPriority)}
-      </div>
-      <div class="pack-qr-wrap">
-        <div class="pack-qr">${_siteQrImage()}</div>
-        $_siteQrLabel
-      </div>
-    </div>
-  </div>
-  <div class="pick-grid">
-    <div class="pick-box"><strong>Customer</strong><br>${htmlEscape.convert(order.customer)}<br>${htmlEscape.convert(order.email)}</div>
-    <div class="pick-box"><strong>Shipping</strong><br>${htmlEscape.convert(order.shippingCarrier)} ${htmlEscape.convert(order.shippingService)}<br>${htmlEscape.convert(order.trackingNumber.isEmpty ? 'Tracking pending' : order.trackingNumber)}</div>
-  </div>
-  <table>
-    <thead><tr><th>Item</th><th>Qty</th><th>Pick location</th><th>Package size</th></tr></thead>
-    <tbody>$rows</tbody>
-  </table>
-  <div class="signatures">
-    <div class="sig">Picked by / Time</div>
-    <div class="sig">Packed by / Time</div>
-  </div>
-</section>
-''';
-}
-
-class _InvoiceDocumentPreview extends StatelessWidget {
-  const _InvoiceDocumentPreview({required this.order, required this.storeInfo});
-
-  final Order order;
-  final StoreInfo storeInfo;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(18),
-      child: DefaultTextStyle(
-        style: const TextStyle(color: Color(0xFF161616), fontSize: 13),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              color: const Color(0xFF050505),
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'INVOICE',
-                      style: TextStyle(
-                        color: Color(0xFFF7D47C),
-                        fontSize: 30,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 3,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    storeInfo.displayName,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              color: const Color(0xFFF7F2E8),
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Expanded(child: Text('${order.customer}\n${order.email}')),
-                  Text('${order.id}\n${_orderDate(order)}'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            for (final line in order.lines)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text('${line.product.name} • ${line.size}'),
-                    ),
-                    Text('${line.quantity} x ${currency(line.unitPrice)}'),
-                    const SizedBox(width: 12),
-                    Text(currency(line.total)),
-                  ],
-                ),
-              ),
-            const Divider(color: Color(0xFFCCCCCC)),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'Shipping ${currency(order.shippingTotal)}\nTotal ${currency(order.total)}',
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class AccountView extends StatefulWidget {
   const AccountView({
     super.key,
@@ -1895,11 +1589,14 @@ class AccountView extends StatefulWidget {
   State<AccountView> createState() => _AccountViewState();
 }
 
+enum _AccountDetailPage { home, orders, credits, points, referrals }
+
 class _AccountViewState extends State<AccountView> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   late bool _creating;
+  _AccountDetailPage _detailPage = _AccountDetailPage.home;
   bool _submitting = false;
 
   @override
@@ -2098,6 +1795,10 @@ class _AccountViewState extends State<AccountView> {
   }
 
   Widget _accountPanel(CustomerAccount customer) {
+    final orderCount = widget.orders.length;
+    final usedCredits = _creditUsageTotal(widget.orders);
+    final availableLoyaltyCredit = (customer.loyaltyPoints ~/ 100) * 5.0;
+    final referralLink = _referralLink(customer);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2119,47 +1820,211 @@ class _AccountViewState extends State<AccountView> {
           ],
         ),
         const SizedBox(height: 14),
-        _MetricGrid(
-          tall: true,
-          metrics: [
-            _MetricData(
-              Icons.receipt_long_outlined,
-              'Orders',
-              '${customer.orders}',
+        switch (_detailPage) {
+          _AccountDetailPage.home => _CustomerAccountHome(
+            orderCount: orderCount,
+            creditBalance: customer.referralCredits,
+            loyaltyPoints: customer.loyaltyPoints,
+            referralCode: customer.referralCode,
+            onOpenOrders: () =>
+                setState(() => _detailPage = _AccountDetailPage.orders),
+            onOpenCredits: () =>
+                setState(() => _detailPage = _AccountDetailPage.credits),
+            onOpenPoints: () =>
+                setState(() => _detailPage = _AccountDetailPage.points),
+            onOpenReferrals: () =>
+                setState(() => _detailPage = _AccountDetailPage.referrals),
+          ),
+          _AccountDetailPage.orders => _CustomerOrdersPanel(
+            orders: widget.orders,
+            storeInfo: widget.storeInfo,
+            onBack: _openAccountHome,
+          ),
+          _AccountDetailPage.credits => _CustomerCreditsPanel(
+            customer: customer,
+            orders: widget.orders,
+            usedCredits: usedCredits,
+            onBack: _openAccountHome,
+          ),
+          _AccountDetailPage.points => _CustomerPointsPanel(
+            customer: customer,
+            orders: widget.orders,
+            availableCredit: availableLoyaltyCredit,
+            onBack: _openAccountHome,
+          ),
+          _AccountDetailPage.referrals => _CustomerReferralsPanel(
+            customer: customer,
+            orders: widget.orders,
+            referralLink: referralLink,
+            onBack: _openAccountHome,
+          ),
+        },
+      ],
+    );
+  }
+
+  void _openAccountHome() {
+    setState(() => _detailPage = _AccountDetailPage.home);
+  }
+
+  double _creditUsageTotal(List<Order> orders) {
+    return orders.fold<double>(0, (total, order) {
+      final code = order.couponCode.trim().toUpperCase();
+      final referralCode =
+          widget.customer?.referralCode.trim().toUpperCase() ?? '';
+      if (code == 'LOYALTY' || code == referralCode) {
+        return total + order.discountTotal;
+      }
+      return total;
+    });
+  }
+
+  String _referralLink(CustomerAccount customer) {
+    final code = customer.referralCode.trim();
+    final base = Uri.base;
+    return base.replace(path: '/', queryParameters: {'ref': code}).toString();
+  }
+}
+
+class _CustomerAccountHome extends StatelessWidget {
+  const _CustomerAccountHome({
+    required this.orderCount,
+    required this.creditBalance,
+    required this.loyaltyPoints,
+    required this.referralCode,
+    required this.onOpenOrders,
+    required this.onOpenCredits,
+    required this.onOpenPoints,
+    required this.onOpenReferrals,
+  });
+
+  final int orderCount;
+  final double creditBalance;
+  final int loyaltyPoints;
+  final String referralCode;
+  final VoidCallback onOpenOrders;
+  final VoidCallback onOpenCredits;
+  final VoidCallback onOpenPoints;
+  final VoidCallback onOpenReferrals;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth > 900 ? 4 : 2;
+        final width = (constraints.maxWidth - ((columns - 1) * 12)) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _AccountActionCard(
+              width: width,
+              icon: Icons.receipt_long_outlined,
+              title: 'Orders',
+              value: '$orderCount',
+              detail: 'Invoices and order details',
+              onTap: onOpenOrders,
             ),
-            _MetricData(
-              Icons.diamond_outlined,
-              'Lifetime',
-              currency(customer.lifetimeValue),
+            _AccountActionCard(
+              width: width,
+              icon: Icons.card_giftcard,
+              title: 'Credits',
+              value: currency(creditBalance),
+              detail: 'Balance and activity',
+              onTap: onOpenCredits,
             ),
-            _MetricData(
-              Icons.group_add_outlined,
-              'Referral',
-              customer.referralCode,
+            _AccountActionCard(
+              width: width,
+              icon: Icons.loyalty_outlined,
+              title: 'Points',
+              value: '$loyaltyPoints',
+              detail: currency((loyaltyPoints ~/ 100) * 5.0),
+              onTap: onOpenPoints,
             ),
-            _MetricData(
-              Icons.card_giftcard,
-              'Credits',
-              currency(customer.referralCredits),
+            _AccountActionCard(
+              width: width,
+              icon: Icons.group_add_outlined,
+              title: 'Referral',
+              value: referralCode,
+              detail: 'Link and referred orders',
+              onTap: onOpenReferrals,
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        _CustomerOrdersPanel(
-          orders: widget.orders,
-          storeInfo: widget.storeInfo,
-        ),
-        const SizedBox(height: 16),
-        _CustomerWishlistPanel(products: widget.wishlistProducts),
-      ],
+        );
+      },
     );
   }
 }
 
-class _CustomerWishlistPanel extends StatelessWidget {
-  const _CustomerWishlistPanel({required this.products});
+class _AccountActionCard extends StatelessWidget {
+  const _AccountActionCard({
+    required this.width,
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.detail,
+    required this.onTap,
+  });
 
-  final List<Fragrance> products;
+  final double width;
+  final IconData icon;
+  final String title;
+  final String value;
+  final String detail;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width.clamp(180, 340).toDouble(),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon),
+                    const Spacer(),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Text(title, style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountDetailScaffold extends StatelessWidget {
+  const _AccountDetailScaffold({
+    required this.title,
+    required this.icon,
+    required this.onBack,
+    required this.child,
+  });
+
+  final String title;
+  final IconData icon;
+  final VoidCallback onBack;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
@@ -2169,33 +2034,25 @@ class _CustomerWishlistPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Wishlist', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
-            if (products.isEmpty)
-              const Text('Saved wishlist items will appear here.')
-            else
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  for (final product in products)
-                    SizedBox(
-                      width: 220,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: SizedBox.square(
-                          dimension: 48,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: ProductPhoto(product: product),
-                          ),
-                        ),
-                        title: Text(product.name),
-                        subtitle: Text(currency(product.price)),
-                      ),
-                    ),
-                ],
-              ),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Back',
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                Icon(icon),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
           ],
         ),
       ),
@@ -2204,76 +2061,38 @@ class _CustomerWishlistPanel extends StatelessWidget {
 }
 
 class _CustomerOrdersPanel extends StatelessWidget {
-  const _CustomerOrdersPanel({required this.orders, required this.storeInfo});
+  const _CustomerOrdersPanel({
+    required this.orders,
+    required this.storeInfo,
+    required this.onBack,
+  });
 
   final List<Order> orders;
   final StoreInfo storeInfo;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
-    if (orders.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.receipt_long_outlined,
-        title: 'No orders yet',
-        body: 'Placed orders will appear here with fulfillment and tracking.',
-      );
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Previous orders',
-              style: Theme.of(context).textTheme.titleLarge,
+    return _AccountDetailScaffold(
+      title: 'Orders',
+      icon: Icons.receipt_long_outlined,
+      onBack: onBack,
+      child: orders.isEmpty
+          ? const _EmptyState(
+              icon: Icons.receipt_long_outlined,
+              title: 'No orders yet',
+              body:
+                  'Placed orders will appear here with fulfillment and tracking.',
+            )
+          : Column(
+              children: [
+                for (final order in orders)
+                  _CustomerOrderTile(
+                    order: order,
+                    onOpenInvoice: () => _openInvoice(context, order),
+                  ),
+              ],
             ),
-            const SizedBox(height: 10),
-            for (final order in orders)
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                leading: const Icon(Icons.receipt_outlined),
-                title: Text('${order.id} • ${currency(order.total)}'),
-                subtitle: Text(
-                  '${order.fulfillmentStatus} • ${order.shippingCarrier} ${order.shippingService}',
-                ),
-                children: [
-                  ListTile(
-                    contentPadding: const EdgeInsets.only(left: 16, right: 8),
-                    leading: const Icon(Icons.description_outlined),
-                    title: const Text('Invoice'),
-                    subtitle: const Text(
-                      'Open printable invoice for this order.',
-                    ),
-                    trailing: const Icon(Icons.open_in_new),
-                    onTap: () => _openInvoice(context, order),
-                  ),
-                  ListTile(
-                    contentPadding: const EdgeInsets.only(left: 16, right: 8),
-                    title: const Text('Tracking'),
-                    subtitle: Text(
-                      order.trackingNumber.isEmpty
-                          ? 'Tracking will appear after the label is created.'
-                          : '${order.shippingCarrier} ${order.trackingNumber}',
-                    ),
-                  ),
-                  if (order.lines.isNotEmpty)
-                    for (final line in order.lines)
-                      ListTile(
-                        contentPadding: const EdgeInsets.only(
-                          left: 16,
-                          right: 8,
-                        ),
-                        title: Text(line.product.name),
-                        subtitle: Text('${line.quantity} item(s)'),
-                        trailing: Text(currency(line.total)),
-                      ),
-                ],
-              ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2305,4 +2124,348 @@ class _CustomerOrdersPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CustomerCreditsPanel extends StatelessWidget {
+  const _CustomerCreditsPanel({
+    required this.customer,
+    required this.orders,
+    required this.usedCredits,
+    required this.onBack,
+  });
+
+  final CustomerAccount customer;
+  final List<Order> orders;
+  final double usedCredits;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final referralUses = orders.where((order) {
+      final code = order.couponCode.trim().toUpperCase();
+      return order.discountTotal > 0 &&
+          (code == 'LOYALTY' || code == customer.referralCode.toUpperCase());
+    }).toList();
+    final totalAdded = customer.referralCredits + usedCredits;
+    return _AccountDetailScaffold(
+      title: 'Credits',
+      icon: Icons.card_giftcard,
+      onBack: onBack,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _OrderDetailPill(
+                label: 'Balance',
+                value: currency(customer.referralCredits),
+              ),
+              _OrderDetailPill(label: 'Added', value: currency(totalAdded)),
+              _OrderDetailPill(label: 'Used', value: currency(usedCredits)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (referralUses.isEmpty && totalAdded == 0)
+            const _EmptyState(
+              icon: Icons.card_giftcard,
+              title: 'No credit activity yet',
+              body: 'Credits earned and used will appear here.',
+            )
+          else ...[
+            if (totalAdded > 0)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.add_circle_outline),
+                title: const Text('Credits added'),
+                subtitle: Text(customer.referralCode),
+                trailing: Text(currency(totalAdded)),
+              ),
+            for (final order in referralUses)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.remove_circle_outline),
+                title: Text('Used on ${order.id}'),
+                subtitle: Text(
+                  order.createdAt == null
+                      ? order.couponCode
+                      : '${order.couponCode} • ${_shortDate(order.createdAt!)}',
+                ),
+                trailing: Text('-${currency(order.discountTotal)}'),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerPointsPanel extends StatelessWidget {
+  const _CustomerPointsPanel({
+    required this.customer,
+    required this.orders,
+    required this.availableCredit,
+    required this.onBack,
+  });
+
+  final CustomerAccount customer;
+  final List<Order> orders;
+  final double availableCredit;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final pointOrders = orders.where((order) {
+      return order.financialStatus.toLowerCase() == 'paid' || order.total > 0;
+    }).toList();
+    final usedPointOrders = orders
+        .where(
+          (order) =>
+              order.discountTotal > 0 &&
+              order.couponCode.trim().toUpperCase() == 'LOYALTY',
+        )
+        .toList();
+    final pointsEarned = pointOrders.fold<int>(
+      0,
+      (total, order) => total + order.total.floor(),
+    );
+    final estimatedUsedPoints = usedPointOrders.fold<int>(0, (total, order) {
+      return total + ((order.discountTotal / 5).ceil() * 100);
+    });
+    return _AccountDetailScaffold(
+      title: 'Points',
+      icon: Icons.loyalty_outlined,
+      onBack: onBack,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _OrderDetailPill(
+                label: 'Available',
+                value: '${customer.loyaltyPoints}',
+              ),
+              _OrderDetailPill(
+                label: 'Credit value',
+                value: currency(availableCredit),
+              ),
+              _OrderDetailPill(label: 'Earned', value: '$pointsEarned'),
+              _OrderDetailPill(label: 'Used', value: '$estimatedUsedPoints'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (pointOrders.isEmpty && usedPointOrders.isEmpty)
+            const _EmptyState(
+              icon: Icons.loyalty_outlined,
+              title: 'No points activity yet',
+              body: 'Points earned and used will appear here.',
+            )
+          else ...[
+            for (final order in pointOrders)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.add_circle_outline),
+                title: Text('Earned from ${order.id}'),
+                subtitle: Text(
+                  order.createdAt == null
+                      ? 'Order purchase'
+                      : _shortDate(order.createdAt!),
+                ),
+                trailing: Text('+${order.total.floor()}'),
+              ),
+            for (final order in usedPointOrders)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.remove_circle_outline),
+                title: Text('Used on ${order.id}'),
+                subtitle: Text(currency(order.discountTotal)),
+                trailing: Text('-${((order.discountTotal / 5).ceil() * 100)}'),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerReferralsPanel extends StatelessWidget {
+  const _CustomerReferralsPanel({
+    required this.customer,
+    required this.orders,
+    required this.referralLink,
+    required this.onBack,
+  });
+
+  final CustomerAccount customer;
+  final List<Order> orders;
+  final String referralLink;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final referredOrders = orders
+        .where(
+          (order) =>
+              order.couponCode.trim().toUpperCase() ==
+              customer.referralCode.trim().toUpperCase(),
+        )
+        .toList();
+    return _AccountDetailScaffold(
+      title: 'Referrals',
+      icon: Icons.group_add_outlined,
+      onBack: onBack,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _OrderDetailPill(label: 'Code', value: customer.referralCode),
+              _OrderDetailPill(
+                label: 'Balance',
+                value: currency(customer.referralCredits),
+              ),
+              _OrderDetailPill(
+                label: 'Orders',
+                value: '${referredOrders.length}',
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Referral link',
+              prefixIcon: const Icon(Icons.link),
+              suffixIcon: IconButton(
+                tooltip: 'Copy',
+                icon: const Icon(Icons.copy),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: referralLink));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Referral link copied.')),
+                  );
+                },
+              ),
+            ),
+            child: SelectableText(referralLink),
+          ),
+          const SizedBox(height: 12),
+          if (referredOrders.isEmpty)
+            const _EmptyState(
+              icon: Icons.group_add_outlined,
+              title: 'No referral orders yet',
+              body: 'Referral orders will appear here.',
+            )
+          else
+            for (final order in referredOrders)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: Text(order.id),
+                subtitle: Text(
+                  order.createdAt == null
+                      ? order.email
+                      : _shortDate(order.createdAt!),
+                ),
+                trailing: Text(currency(order.total)),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerOrderTile extends StatelessWidget {
+  const _CustomerOrderTile({required this.order, required this.onOpenInvoice});
+
+  final Order order;
+  final VoidCallback onOpenInvoice;
+
+  @override
+  Widget build(BuildContext context) {
+    final taxTotal = _orderTaxTotal(order);
+    final shipping = [
+      order.shippingCarrier,
+      order.shippingService,
+    ].where((item) => item.trim().isNotEmpty).join(' ');
+    final subtitleParts = [
+      'Payment: ${order.financialStatus}',
+      'Fulfillment: ${order.fulfillmentStatus}',
+      if (shipping.isNotEmpty) shipping,
+    ];
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      leading: const Icon(Icons.receipt_outlined),
+      title: Text('${order.id} • ${currency(order.total)}'),
+      subtitle: Text(subtitleParts.join(' • ')),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _OrderDetailPill(label: 'Order', value: order.status),
+              _OrderDetailPill(label: 'Payment', value: order.financialStatus),
+              _OrderDetailPill(
+                label: 'Fulfillment',
+                value: order.fulfillmentStatus,
+              ),
+              _OrderDetailPill(label: 'Items', value: '${order.itemCount}'),
+              _OrderDetailPill(
+                label: 'Shipping',
+                value: currency(order.shippingTotal),
+              ),
+              _OrderDetailPill(label: 'Tax', value: currency(taxTotal)),
+              _OrderDetailPill(label: 'Total', value: currency(order.total)),
+            ],
+          ),
+        ),
+        ListTile(
+          contentPadding: const EdgeInsets.only(left: 16, right: 8),
+          leading: const Icon(Icons.description_outlined),
+          title: const Text('Invoice'),
+          subtitle: const Text('Open printable invoice for this order.'),
+          trailing: const Icon(Icons.open_in_new),
+          onTap: onOpenInvoice,
+        ),
+        ListTile(
+          contentPadding: const EdgeInsets.only(left: 16, right: 8),
+          leading: const Icon(Icons.local_shipping_outlined),
+          title: const Text('Tracking'),
+          subtitle: Text(
+            order.trackingNumber.isEmpty
+                ? 'Tracking will appear after the label is created.'
+                : [
+                    if (order.shippingCarrier.isNotEmpty) order.shippingCarrier,
+                    order.trackingNumber,
+                    if (order.trackingStatus.isNotEmpty) order.trackingStatus,
+                  ].join(' • '),
+          ),
+        ),
+        if (order.lines.isNotEmpty)
+          for (final line in order.lines)
+            ListTile(
+              contentPadding: const EdgeInsets.only(left: 16, right: 8),
+              title: Text(line.product.name),
+              subtitle: Text(
+                [
+                  '${line.quantity} item(s)',
+                  if (line.size.trim().isNotEmpty) line.size,
+                  currency(line.unitPrice),
+                ].join(' • '),
+              ),
+              trailing: Text(currency(line.total)),
+            ),
+      ],
+    );
+  }
+}
+
+String _shortDate(DateTime value) {
+  return '${value.month}/${value.day}/${value.year}';
 }

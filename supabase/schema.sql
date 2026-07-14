@@ -1,6 +1,8 @@
 -- Egbe Anom Supabase schema scaffold.
 -- Apply in Supabase SQL editor or with psql before switching the app gateway.
 
+create extension if not exists pgcrypto;
+
 create table if not exists public.products (
   id bigint primary key,
   category_id bigint,
@@ -183,6 +185,8 @@ create table if not exists public.coupon_rules (
   buy_quantity integer not null default 0,
   get_quantity integer not null default 0,
   get_price numeric(10,2) not null default 0,
+  remaining_balance numeric(10,2) not null default 0,
+  recipient_email text not null default '',
   starts_on text not null default '',
   ends_on text not null default '',
   is_active boolean not null default true,
@@ -194,7 +198,9 @@ create table if not exists public.coupon_rules (
 alter table public.coupon_rules
   add column if not exists buy_quantity integer not null default 0,
   add column if not exists get_quantity integer not null default 0,
-  add column if not exists get_price numeric(10,2) not null default 0;
+  add column if not exists get_price numeric(10,2) not null default 0,
+  add column if not exists remaining_balance numeric(10,2) not null default 0,
+  add column if not exists recipient_email text not null default '';
 
 create table if not exists public.payment_methods (
   id bigint generated always as identity primary key,
@@ -288,14 +294,15 @@ create table if not exists public.content_blocks (
 );
 
 create table if not exists public.orders (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   order_number text not null unique,
   custom_customer_id text,
   customer_name text not null,
   email text not null,
+  checkout_token text not null default '',
   status text not null default 'Pending',
   financial_status text not null default 'Pending',
-  fulfillment_status text not null default 'Unfulfilled',
+  fulfillment_status text not null default 'Pending',
   subtotal numeric(10,2) not null default 0,
   discount_total numeric(10,2) not null default 0,
   tax_total numeric(10,2) not null default 0,
@@ -303,30 +310,72 @@ create table if not exists public.orders (
   grand_total numeric(10,2) not null default 0,
   payment_provider text not null default '',
   payment_reference text not null default '',
+  payment_session_id text not null default '',
   coupon_code text not null default '',
   item_count integer not null default 0,
   shipping_carrier text not null default '',
   shipping_service text not null default '',
   shipping_priority text not null default 'Standard',
   tracking_number text not null default '',
+  tracking_status text not null default '',
+  tracking_url text not null default '',
+  tracking_last_checked_at timestamptz,
   label_status text not null default 'Not requested',
+  refund_status text not null default 'Not refunded',
+  refund_total numeric(10,2) not null default 0,
+  refund_reference text not null default '',
+  refund_reason text not null default '',
+  refunded_at timestamptz,
+  return_status text not null default 'No return',
+  return_reason text not null default '',
+  return_restocked boolean not null default false,
+  returned_at timestamptz,
   invoice_number text not null default '',
   invoice_snapshot jsonb not null default '{}'::jsonb,
+  inventory_decremented boolean not null default false,
   tax_breakdown jsonb not null default '[]'::jsonb,
   shipping_address jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table public.orders
+  add column if not exists inventory_decremented boolean not null default false;
+
+alter table public.orders
+  add column if not exists checkout_token text not null default '',
+  add column if not exists payment_session_id text not null default '',
+  add column if not exists refund_status text not null default 'Not refunded',
+  add column if not exists refund_total numeric(10,2) not null default 0,
+  add column if not exists refund_reference text not null default '',
+  add column if not exists refund_reason text not null default '',
+  add column if not exists refunded_at timestamptz,
+  add column if not exists return_status text not null default 'No return',
+  add column if not exists return_reason text not null default '',
+  add column if not exists return_restocked boolean not null default false,
+  add column if not exists returned_at timestamptz,
+  add column if not exists tracking_status text not null default '',
+  add column if not exists tracking_url text not null default '',
+  add column if not exists tracking_last_checked_at timestamptz;
+
+update public.orders
+set order_number = id
+where order_number is null or btrim(order_number) = '';
+
+alter table public.orders
+  alter column order_number set not null;
+
 alter table public.orders drop constraint if exists orders_fulfillment_status_check;
 alter table public.orders add constraint orders_fulfillment_status_check
   check (
     fulfillment_status in (
-      'Unfulfilled',
       'Pending',
       'Processing',
+      'Invoice created',
+      'Unfulfilled',
       'Being picked',
-      'Label Printed',
+      'Packing',
+      'Label printed',
       'Label created',
       'Sent',
       'Shipped',
@@ -338,7 +387,9 @@ alter table public.orders add constraint orders_fulfillment_status_check
 create table if not exists public.order_items (
   id bigint generated always as identity primary key,
   order_id text not null,
+  checkout_token text not null default '',
   product_id bigint references public.products(id) on delete set null,
+  variant_id bigint references public.product_variants(id) on delete set null,
   sku text not null default '',
   product_name text not null,
   size text not null default '',
@@ -350,8 +401,51 @@ create table if not exists public.order_items (
   created_at timestamptz not null default now()
 );
 
-create table if not exists public.store_reviews (
+create table if not exists public.customer_wishlist (
+  id bigint generated always as identity primary key,
+  customer_email text not null,
+  product_id bigint not null references public.products(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique(customer_email, product_id)
+);
+
+create table if not exists public.active_carts (
   id text primary key,
+  customer_email text not null default '',
+  customer_name text not null default 'Guest shopper',
+  status text not null default 'active',
+  item_count integer not null default 0,
+  subtotal numeric(10,2) not null default 0,
+  lines jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  recovered_at timestamptz
+);
+
+alter table public.active_carts
+  add column if not exists customer_email text not null default '',
+  add column if not exists customer_name text not null default 'Guest shopper',
+  add column if not exists status text not null default 'active',
+  add column if not exists item_count integer not null default 0,
+  add column if not exists subtotal numeric(10,2) not null default 0,
+  add column if not exists lines jsonb not null default '[]'::jsonb,
+  add column if not exists recovered_at timestamptz;
+
+create index if not exists idx_customer_wishlist_email
+  on public.customer_wishlist(customer_email);
+create index if not exists idx_customer_wishlist_product
+  on public.customer_wishlist(product_id);
+create index if not exists idx_active_carts_status_seen
+  on public.active_carts(status, last_seen_at desc);
+
+alter table public.order_items
+  add column if not exists variant_id bigint references public.product_variants(id) on delete set null;
+
+alter table public.order_items
+  add column if not exists checkout_token text not null default '';
+
+create table if not exists public.store_reviews (
+  id bigint generated always as identity primary key,
   scope text not null default 'product',
   product_id bigint references public.products(id) on delete set null,
   customer_email text not null default '',
@@ -391,6 +485,61 @@ create table if not exists public.admin_notifications (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.analytics_daily_metrics (
+  day date primary key,
+  label text not null,
+  new_users integer not null default 0,
+  visits integer not null default 0,
+  orders integer not null default 0,
+  revenue numeric(12,2) not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.analytics_sessions (
+  id text primary key,
+  visitor text not null default 'Guest visitor',
+  current_page text not null default '',
+  source text not null default 'Direct',
+  referrer text not null default 'Direct',
+  device text not null default 'Unknown device',
+  started_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create table if not exists public.analytics_events (
+  id text primary key,
+  session_id text not null default '',
+  visitor text not null default 'Guest visitor',
+  event_name text not null,
+  page text not null default '',
+  source text not null default 'Direct',
+  referrer text not null default 'Direct',
+  device text not null default 'Unknown device',
+  product_id bigint,
+  product_name text not null default '',
+  order_id text not null default '',
+  value numeric(12,2) not null default 0,
+  currency text not null default 'USD',
+  metadata jsonb not null default '{}'::jsonb,
+  occurred_at timestamptz not null default now()
+);
+
+alter table public.analytics_events
+  add column if not exists session_id text not null default '',
+  add column if not exists visitor text not null default 'Guest visitor',
+  add column if not exists event_name text not null default '',
+  add column if not exists page text not null default '',
+  add column if not exists source text not null default 'Direct',
+  add column if not exists referrer text not null default 'Direct',
+  add column if not exists device text not null default 'Unknown device',
+  add column if not exists product_id bigint,
+  add column if not exists product_name text not null default '',
+  add column if not exists order_id text not null default '',
+  add column if not exists value numeric(12,2) not null default 0,
+  add column if not exists currency text not null default 'USD',
+  add column if not exists metadata jsonb not null default '{}'::jsonb,
+  add column if not exists occurred_at timestamptz not null default now();
+
 create table if not exists public.store_customers (
   id text primary key,
   auth_user_id uuid references auth.users(id) on delete set null,
@@ -402,6 +551,8 @@ create table if not exists public.store_customers (
   segment text not null default 'Customer',
   referral_code text not null default '',
   referral_credits numeric(10,2) not null default 0,
+  loyalty_points integer not null default 0,
+  referred_by text not null default '',
   phone text not null default '',
   order_count integer not null default 0,
   accepts_marketing boolean not null default false,
@@ -429,6 +580,8 @@ alter table public.store_customers
   add column if not exists segment text not null default 'Customer',
   add column if not exists referral_code text not null default '',
   add column if not exists referral_credits numeric(10,2) not null default 0,
+  add column if not exists loyalty_points integer not null default 0,
+  add column if not exists referred_by text not null default '',
   add column if not exists is_blocked boolean not null default false,
   add column if not exists created_ip text not null default '',
   add column if not exists last_login_ip text not null default '',
@@ -482,6 +635,63 @@ create table if not exists public.site_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.encrypted_credentials (
+  id uuid primary key default gen_random_uuid(),
+  provider_type text not null check (
+    provider_type in ('email_server', 'payment_processor', 'shipping_carrier')
+  ),
+  provider_name text not null,
+  credentials_encrypted bytea not null,
+  encryption_algorithm text not null default 'aes',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references auth.users(id) on delete set null,
+  unique (provider_type, provider_name)
+);
+
+create table if not exists public.credential_access_log (
+  id uuid primary key default gen_random_uuid(),
+  provider_type text not null,
+  provider_name text not null,
+  action text not null check (action in ('read', 'write', 'delete')),
+  accessed_by uuid references auth.users(id) on delete set null,
+  accessed_at timestamptz not null default now(),
+  ip_address text,
+  notes text
+);
+
+create table if not exists public.rate_limit_events (
+  id bigint generated always as identity primary key,
+  scope text not null,
+  subject text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.admin_audit_log (
+  id bigint generated always as identity primary key,
+  action text not null,
+  entity_type text not null,
+  entity_id text not null default '',
+  summary text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_audit_log_created
+  on public.admin_audit_log(created_at desc);
+create index if not exists idx_admin_audit_log_entity
+  on public.admin_audit_log(entity_type, entity_id);
+
+create index if not exists idx_rate_limit_events_scope_subject_created
+  on public.rate_limit_events(scope, subject, created_at desc);
+
+create index if not exists idx_encrypted_creds_provider
+  on public.encrypted_credentials(provider_type, provider_name);
+create index if not exists idx_credential_access_log_date
+  on public.credential_access_log(accessed_at desc);
+create index if not exists idx_credential_access_log_provider
+  on public.credential_access_log(provider_type, provider_name);
+
 insert into storage.buckets (id, name, public)
 values ('product-images', 'product-images', true)
 on conflict (id) do update set public = excluded.public;
@@ -511,6 +721,226 @@ as $$
   );
 $$;
 
+create or replace function public.encryption_key_from_hex(
+  p_encryption_key_hex text
+)
+returns bytea
+language sql
+stable
+as $$
+  select decode(p_encryption_key_hex, 'hex');
+$$;
+
+create or replace function public.encrypt_credential_value(
+  p_data text,
+  p_encryption_key_hex text
+)
+returns bytea
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_iv bytea;
+  v_encrypted bytea;
+begin
+  v_iv := extensions.gen_random_bytes(16);
+  v_encrypted := extensions.encrypt_iv(
+    convert_to(p_data, 'utf8'),
+    public.encryption_key_from_hex(p_encryption_key_hex),
+    v_iv,
+    'aes'
+  );
+  return v_iv || v_encrypted;
+end;
+$$;
+
+create or replace function public.decrypt_credential_value(
+  p_encrypted_data bytea,
+  p_encryption_key_hex text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_iv bytea;
+  v_encrypted bytea;
+  v_decrypted bytea;
+begin
+  v_iv := substring(p_encrypted_data, 1, 16);
+  v_encrypted := substring(p_encrypted_data, 17);
+  v_decrypted := extensions.decrypt_iv(
+    v_encrypted,
+    public.encryption_key_from_hex(p_encryption_key_hex),
+    v_iv,
+    'aes'
+  );
+  return convert_from(v_decrypted, 'utf8');
+end;
+$$;
+
+create or replace function public.log_credential_access(
+  p_provider_type text,
+  p_provider_name text,
+  p_action text,
+  p_ip_address text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.credential_access_log (
+    provider_type,
+    provider_name,
+    action,
+    accessed_by,
+    ip_address,
+    notes
+  )
+  values (
+    p_provider_type,
+    p_provider_name,
+    p_action,
+    auth.uid(),
+    p_ip_address,
+    'Accessed by admin user'
+  );
+end;
+$$;
+
+create or replace function public.upsert_encrypted_credential(
+  p_provider_type text,
+  p_provider_name text,
+  p_credentials_json text,
+  p_encryption_key_hex text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_credential_id uuid;
+  v_encrypted bytea;
+begin
+  if not public.is_backend_admin() then
+    raise exception 'Only backend admins can store credentials';
+  end if;
+
+  v_encrypted := public.encrypt_credential_value(
+    p_credentials_json,
+    p_encryption_key_hex
+  );
+
+  insert into public.encrypted_credentials (
+    provider_type,
+    provider_name,
+    credentials_encrypted,
+    created_by
+  )
+  values (
+    p_provider_type,
+    lower(btrim(p_provider_name)),
+    v_encrypted,
+    auth.uid()
+  )
+  on conflict (provider_type, provider_name)
+  do update set
+    credentials_encrypted = excluded.credentials_encrypted,
+    updated_at = now()
+  returning id into v_credential_id;
+
+  perform public.log_credential_access(
+    p_provider_type,
+    lower(btrim(p_provider_name)),
+    'write'
+  );
+
+  return v_credential_id;
+end;
+$$;
+
+create or replace function public.get_encrypted_credential(
+  p_provider_type text,
+  p_provider_name text,
+  p_encryption_key_hex text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_encrypted bytea;
+begin
+  if not public.is_backend_admin() then
+    raise exception 'Only backend admins can retrieve credentials';
+  end if;
+
+  select credentials_encrypted into v_encrypted
+  from public.encrypted_credentials
+  where provider_type = p_provider_type
+    and provider_name = lower(btrim(p_provider_name));
+
+  perform public.log_credential_access(
+    p_provider_type,
+    lower(btrim(p_provider_name)),
+    'read'
+  );
+
+  if v_encrypted is null then
+    return null;
+  end if;
+
+  return public.decrypt_credential_value(v_encrypted, p_encryption_key_hex);
+end;
+$$;
+
+grant execute on function public.upsert_encrypted_credential(text, text, text, text)
+  to authenticated;
+grant execute on function public.get_encrypted_credential(text, text, text)
+  to authenticated;
+
+create or replace function public.check_rate_limit(
+  p_scope text,
+  p_subject text,
+  p_window_seconds integer default 60,
+  p_max_events integer default 30
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  delete from public.rate_limit_events
+  where created_at < now() - interval '1 day';
+
+  select count(*) into v_count
+  from public.rate_limit_events
+  where scope = p_scope
+    and subject = p_subject
+    and created_at >= now() - make_interval(secs => greatest(p_window_seconds, 1));
+
+  if v_count >= greatest(p_max_events, 1) then
+    return false;
+  end if;
+
+  insert into public.rate_limit_events(scope, subject)
+  values (p_scope, p_subject);
+  return true;
+end;
+$$;
+
+grant execute on function public.check_rate_limit(text, text, integer, integer)
+  to anon, authenticated;
+
 alter table public.products enable row level security;
 alter table public.product_variants enable row level security;
 alter table public.product_images enable row level security;
@@ -534,7 +964,16 @@ alter table public.store_customers enable row level security;
 alter table public.backend_users enable row level security;
 alter table public.blocked_ips enable row level security;
 alter table public.site_settings enable row level security;
+alter table public.encrypted_credentials enable row level security;
+alter table public.credential_access_log enable row level security;
+alter table public.rate_limit_events enable row level security;
+alter table public.admin_audit_log enable row level security;
 alter table public.admin_notifications enable row level security;
+alter table public.analytics_daily_metrics enable row level security;
+alter table public.analytics_sessions enable row level security;
+alter table public.analytics_events enable row level security;
+alter table public.customer_wishlist enable row level security;
+alter table public.active_carts enable row level security;
 
 drop policy if exists "public product read" on public.products;
 drop policy if exists "public product image read" on public.product_images;
@@ -566,6 +1005,7 @@ drop policy if exists "backend admins manage backend users" on public.backend_us
 drop policy if exists "authenticated users can create orders" on public.orders;
 drop policy if exists "customers can create orders" on public.orders;
 drop policy if exists "customers read own orders" on public.orders;
+drop policy if exists "payment return can update pending orders" on public.orders;
 drop policy if exists "customers can create order items" on public.order_items;
 drop policy if exists "customers read own order items" on public.order_items;
 drop policy if exists "authenticated users create reviews" on public.store_reviews;
@@ -585,8 +1025,196 @@ drop policy if exists "backend admins manage orders" on public.orders;
 drop policy if exists "backend admins manage order items" on public.order_items;
 drop policy if exists "backend admins manage surveys" on public.order_surveys;
 drop policy if exists "backend admins manage settings" on public.site_settings;
+drop policy if exists "backend admins manage encrypted credentials" on public.encrypted_credentials;
+drop policy if exists "backend admins read credential access log" on public.credential_access_log;
+drop policy if exists "backend admins read rate limit events" on public.rate_limit_events;
+drop policy if exists "backend admins manage admin audit log" on public.admin_audit_log;
 drop policy if exists "backend admins manage blocked ips" on public.blocked_ips;
 drop policy if exists "backend admins manage admin notifications" on public.admin_notifications;
+drop policy if exists "backend admins read analytics daily metrics" on public.analytics_daily_metrics;
+drop policy if exists "backend admins read analytics sessions" on public.analytics_sessions;
+drop policy if exists "public insert analytics sessions" on public.analytics_sessions;
+drop policy if exists "public update analytics sessions" on public.analytics_sessions;
+drop policy if exists "backend admins read analytics events" on public.analytics_events;
+drop policy if exists "public insert analytics events" on public.analytics_events;
+drop policy if exists "customers manage own wishlist" on public.customer_wishlist;
+drop policy if exists "backend admins manage wishlist" on public.customer_wishlist;
+drop policy if exists "public upsert active carts" on public.active_carts;
+drop policy if exists "public update active carts" on public.active_carts;
+drop policy if exists "backend admins read active carts" on public.active_carts;
+drop policy if exists "backend admins manage active carts" on public.active_carts;
+
+create or replace function public.increment_daily_analytics(
+  p_day date,
+  p_label text,
+  p_new_users integer default 0,
+  p_visits integer default 0,
+  p_orders integer default 0,
+  p_revenue numeric default 0
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.check_rate_limit(
+    'analytics_daily_metrics',
+    p_day::text || ':' || coalesce(p_label, ''),
+    60,
+    300
+  ) then
+    return;
+  end if;
+
+  insert into public.analytics_daily_metrics (
+    day,
+    label,
+    new_users,
+    visits,
+    orders,
+    revenue,
+    updated_at
+  )
+  values (
+    p_day,
+    p_label,
+    greatest(p_new_users, 0),
+    greatest(p_visits, 0),
+    greatest(p_orders, 0),
+    greatest(coalesce(p_revenue, 0), 0),
+    now()
+  )
+  on conflict (day) do update
+  set
+    label = excluded.label,
+    new_users = public.analytics_daily_metrics.new_users + excluded.new_users,
+    visits = public.analytics_daily_metrics.visits + excluded.visits,
+    orders = public.analytics_daily_metrics.orders + excluded.orders,
+    revenue = public.analytics_daily_metrics.revenue + excluded.revenue,
+    updated_at = now();
+end;
+$$;
+
+grant execute on function public.increment_daily_analytics(date, text, integer, integer, integer, numeric)
+  to anon, authenticated;
+
+create or replace function public.find_redeemable_coupon(p_code text)
+returns table (
+  code text,
+  name text,
+  discount_type text,
+  value numeric,
+  minimum_spend numeric,
+  usage_limit integer,
+  used integer,
+  buy_quantity integer,
+  get_quantity integer,
+  get_price numeric,
+  remaining_balance numeric,
+  recipient_email text,
+  starts_on text,
+  ends_on text,
+  is_active boolean,
+  is_archived boolean
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    c.code,
+    c.name,
+    c.discount_type,
+    c.value,
+    c.minimum_spend,
+    c.usage_limit,
+    c.used,
+    c.buy_quantity,
+    c.get_quantity,
+    c.get_price,
+    c.remaining_balance,
+    c.recipient_email,
+    c.starts_on,
+    c.ends_on,
+    c.is_active,
+    c.is_archived
+  from public.coupon_rules c
+  where upper(c.code) = upper(btrim(p_code))
+    and c.is_active = true
+    and c.is_archived = false
+  limit 1;
+$$;
+
+grant execute on function public.find_redeemable_coupon(text)
+  to anon, authenticated;
+
+create or replace function public.upsert_analytics_session(
+  p_id text,
+  p_visitor text,
+  p_current_page text,
+  p_source text,
+  p_referrer text,
+  p_device text,
+  p_started_at timestamptz,
+  p_last_seen_at timestamptz
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.check_rate_limit(
+    'analytics_session',
+    coalesce(p_id, 'anonymous'),
+    60,
+    120
+  ) then
+    return;
+  end if;
+
+  insert into public.analytics_sessions (
+    id,
+    visitor,
+    current_page,
+    source,
+    referrer,
+    device,
+    started_at,
+    last_seen_at
+  )
+  values (
+    p_id,
+    coalesce(nullif(p_visitor, ''), 'Guest visitor'),
+    coalesce(nullif(p_current_page, ''), 'shop'),
+    coalesce(nullif(p_source, ''), 'Direct'),
+    coalesce(nullif(p_referrer, ''), 'Direct'),
+    coalesce(nullif(p_device, ''), 'Unknown device'),
+    coalesce(p_started_at, now()),
+    coalesce(p_last_seen_at, now())
+  )
+  on conflict (id) do update
+  set
+    visitor = excluded.visitor,
+    current_page = excluded.current_page,
+    source = excluded.source,
+    referrer = excluded.referrer,
+    device = excluded.device,
+    last_seen_at = excluded.last_seen_at;
+end;
+$$;
+
+grant execute on function public.upsert_analytics_session(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  timestamptz,
+  timestamptz
+) to anon, authenticated;
 
 create policy "public product read" on public.products
   for select using (is_active = true or public.is_backend_admin());
@@ -626,9 +1254,26 @@ create policy "public enabled payment read" on public.payment_methods
   for select using (is_enabled = true or public.is_backend_admin());
 create policy "public active coupon read" on public.coupon_rules
   for select using (
-    (is_active = true and is_archived = false)
+    (
+      is_active = true
+      and is_archived = false
+      and discount_type <> 'Gift card'
+    )
     or public.is_backend_admin()
   );
+create policy "backend admins read analytics daily metrics" on public.analytics_daily_metrics
+  for select using (public.is_backend_admin());
+create policy "backend admins read analytics sessions" on public.analytics_sessions
+  for select using (public.is_backend_admin());
+create policy "backend admins read analytics events" on public.analytics_events
+  for select using (public.is_backend_admin());
+create policy "public insert analytics events" on public.analytics_events
+  for insert with check (true);
+
+grant select on public.analytics_daily_metrics to authenticated;
+grant select on public.analytics_sessions to authenticated;
+grant select on public.analytics_events to authenticated;
+grant insert on public.analytics_events to anon, authenticated;
 
 create policy "customers own profile read" on public.store_customers
   for select using (auth_user_id = auth.uid() or public.is_backend_admin());
@@ -672,41 +1317,295 @@ create policy "backend admins manage backend users" on public.backend_users
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 
 create policy "customers can create orders" on public.orders
-  for insert with check (true);
+  for insert with check (
+    checkout_token <> ''
+    and status in ('Pending', 'pending')
+    and financial_status in ('Unpaid', 'unpaid', 'Pending', 'pending')
+  );
 create policy "customers read own orders" on public.orders
   for select using (
     public.is_backend_admin()
     or email = (auth.jwt() ->> 'email')
   );
+create policy "payment return can update pending orders" on public.orders
+  for update using (
+    financial_status in ('unpaid', 'Unpaid', 'Pending', 'pending')
+  )
+  with check (
+    financial_status in ('paid', 'Paid', 'unpaid', 'Unpaid', 'Pending', 'pending')
+  );
+
+create or replace function public.order_exists(
+  p_order_id text,
+  p_checkout_token text default ''
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.orders
+    where order_number = p_order_id
+      and (
+        p_checkout_token = ''
+        or (
+          checkout_token <> ''
+          and checkout_token = p_checkout_token
+        )
+      )
+  );
+$$;
+
+create or replace function public.paid_order_exists_for_email(p_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.orders
+    where lower(email) = lower(p_email)
+      and financial_status in ('paid', 'Paid')
+  );
+$$;
+
+create or replace function public.paid_order_exists_for_customer(
+  p_order_id text,
+  p_email text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.orders
+    where order_number = p_order_id
+      and lower(email) = lower(p_email)
+      and financial_status in ('paid', 'Paid')
+  );
+$$;
+
+create or replace function public.mark_checkout_order_paid(
+  p_order_number text,
+  p_email text,
+  p_payment_provider text default '',
+  p_payment_reference text default ''
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_count integer;
+begin
+  update public.orders
+  set
+    financial_status = 'Paid',
+    payment_provider = coalesce(nullif(p_payment_provider, ''), payment_provider),
+    payment_reference = coalesce(nullif(p_payment_reference, ''), payment_reference),
+    updated_at = now()
+  where order_number = p_order_number
+    and lower(email) = lower(p_email)
+    and financial_status in ('unpaid', 'Unpaid', 'pending', 'Pending');
+
+  get diagnostics updated_count = row_count;
+  return updated_count > 0;
+end;
+$$;
+
+grant execute on function public.mark_checkout_order_paid(text, text, text, text)
+  to anon, authenticated;
+
+create or replace function public.decrement_inventory_for_order(
+  p_order_number text,
+  p_email text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item record;
+  order_is_paid boolean;
+  updated_count integer;
+begin
+  for item in
+    select oi.product_id, oi.variant_id, oi.sku, oi.quantity,
+      coalesce(pv.stock, p.stock, 0) as available_stock
+    from public.order_items oi
+    left join public.product_variants pv on pv.id = oi.variant_id
+    left join public.products p on p.id = oi.product_id
+    where oi.order_id = p_order_number
+  loop
+    if item.available_stock < item.quantity then
+      raise exception 'Not enough inventory for order %. SKU % has % available and % requested.',
+        p_order_number,
+        coalesce(item.sku, ''),
+        item.available_stock,
+        item.quantity;
+    end if;
+  end loop;
+
+  update public.orders
+  set
+    inventory_decremented = true,
+    updated_at = now()
+  where order_number = p_order_number
+    and lower(email) = lower(p_email)
+    and financial_status in ('paid', 'Paid')
+    and inventory_decremented = false;
+
+  get diagnostics updated_count = row_count;
+  order_is_paid = updated_count > 0;
+
+  if not order_is_paid then
+    return false;
+  end if;
+
+  for item in
+    select product_id, variant_id, sku, quantity
+    from public.order_items
+    where order_id = p_order_number
+  loop
+    if item.variant_id is not null then
+      update public.product_variants
+      set
+        stock = greatest(stock - item.quantity, 0),
+        updated_at = now()
+      where id = item.variant_id;
+    elsif coalesce(item.sku, '') <> '' then
+      update public.product_variants
+      set
+        stock = greatest(stock - item.quantity, 0),
+        updated_at = now()
+      where sku = item.sku;
+    end if;
+
+    if item.product_id is not null then
+      update public.products
+      set
+        stock = greatest(stock - item.quantity, 0),
+        sold = sold + item.quantity,
+        updated_at = now()
+      where id = item.product_id;
+    end if;
+  end loop;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.decrement_inventory_for_order(text, text)
+  to anon, authenticated;
+
+create or replace function public.restock_inventory_for_order(
+  p_order_number text,
+  p_email text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item record;
+  updated_count integer;
+begin
+  if not public.is_backend_admin() then
+    raise exception 'Only backend admins can restock refunded orders.';
+  end if;
+
+  update public.orders
+  set
+    inventory_decremented = false,
+    updated_at = now()
+  where order_number = p_order_number
+    and lower(email) = lower(p_email)
+    and inventory_decremented = true;
+
+  get diagnostics updated_count = row_count;
+  if updated_count = 0 then
+    return false;
+  end if;
+
+  for item in
+    select product_id, variant_id, sku, quantity
+    from public.order_items
+    where order_id = p_order_number
+  loop
+    if item.variant_id is not null then
+      update public.product_variants
+      set
+        stock = stock + item.quantity,
+        updated_at = now()
+      where id = item.variant_id;
+    elsif coalesce(item.sku, '') <> '' then
+      update public.product_variants
+      set
+        stock = stock + item.quantity,
+        updated_at = now()
+      where sku = item.sku;
+    end if;
+
+    if item.product_id is not null then
+      update public.products
+      set
+        stock = stock + item.quantity,
+        sold = greatest(sold - item.quantity, 0),
+        updated_at = now()
+      where id = item.product_id;
+    end if;
+  end loop;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.restock_inventory_for_order(text, text)
+  to authenticated;
+
 create policy "customers can create order items" on public.order_items
   for insert with check (
-    exists (
-      select 1 from public.orders
-      where orders.id::text = order_items.order_id
-    )
+    checkout_token <> ''
+    and public.order_exists(order_id, checkout_token)
   );
 create policy "customers read own order items" on public.order_items
   for select using (
     public.is_backend_admin()
     or exists (
       select 1 from public.orders
-      where orders.id::text = order_items.order_id
+      where orders.order_number = order_items.order_id
         and orders.email = (auth.jwt() ->> 'email')
     )
   );
 
 create policy "customers create verified reviews" on public.store_reviews
   for insert with check (
-    (
-      auth.role() = 'authenticated'
-      and customer_email = (auth.jwt() ->> 'email')
+    public.check_rate_limit(
+      'review_insert',
+      coalesce(nullif(customer_email, ''), auth.jwt() ->> 'email', 'anonymous'),
+      3600,
+      5
     )
-    or (
-      scope = 'company'
-      and customer_email <> ''
-      and exists (
-        select 1 from public.orders
-        where orders.email = store_reviews.customer_email
+    and (
+      (
+        auth.role() = 'authenticated'
+        and customer_email = (auth.jwt() ->> 'email')
+      )
+      or (
+        lower(scope) = 'company'
+        and customer_email <> ''
+        and public.paid_order_exists_for_email(customer_email)
       )
     )
   );
@@ -714,15 +1613,17 @@ create policy "backend admins manage reviews" on public.store_reviews
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "verified customers create order surveys" on public.order_surveys
   for insert with check (
-    exists (
-      select 1 from public.orders
-      where orders.id::text = order_surveys.order_id
-        and orders.email = order_surveys.customer_email
-        and (
-          auth.role() = 'anon'
-          or auth.jwt() ->> 'email' = order_surveys.customer_email
-          or public.is_backend_admin()
-        )
+    public.paid_order_exists_for_customer(order_id, customer_email)
+    and public.check_rate_limit(
+      'survey_insert',
+      coalesce(nullif(customer_email, ''), auth.jwt() ->> 'email', 'anonymous'),
+      3600,
+      3
+    )
+    and (
+      auth.role() = 'anon'
+      or auth.jwt() ->> 'email' = customer_email
+      or public.is_backend_admin()
     )
   );
 create policy "customers read own surveys" on public.order_surveys
@@ -730,6 +1631,26 @@ create policy "customers read own surveys" on public.order_surveys
     public.is_backend_admin()
     or customer_email = (auth.jwt() ->> 'email')
   );
+
+create policy "customers manage own wishlist" on public.customer_wishlist
+  for all using (
+    public.is_backend_admin()
+    or customer_email = (auth.jwt() ->> 'email')
+  ) with check (
+    public.is_backend_admin()
+    or customer_email = (auth.jwt() ->> 'email')
+  );
+create policy "backend admins manage wishlist" on public.customer_wishlist
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "public upsert active carts" on public.active_carts
+  for insert with check (auth.role() in ('anon', 'authenticated'));
+create policy "public update active carts" on public.active_carts
+  for update using (auth.role() in ('anon', 'authenticated'))
+  with check (auth.role() in ('anon', 'authenticated'));
+create policy "backend admins read active carts" on public.active_carts
+  for select using (public.is_backend_admin());
+create policy "backend admins manage active carts" on public.active_carts
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 
 create policy "backend admins manage products" on public.products
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
@@ -757,6 +1678,14 @@ create policy "backend admins manage surveys" on public.order_surveys
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage settings" on public.site_settings
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "backend admins manage encrypted credentials" on public.encrypted_credentials
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "backend admins read credential access log" on public.credential_access_log
+  for select using (public.is_backend_admin());
+create policy "backend admins read rate limit events" on public.rate_limit_events
+  for select using (public.is_backend_admin());
+create policy "backend admins manage admin audit log" on public.admin_audit_log
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage blocked ips" on public.blocked_ips
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage admin notifications" on public.admin_notifications
@@ -780,3 +1709,38 @@ create policy "backend admins delete product image objects" on storage.objects
     bucket_id = 'product-images'
     and public.is_backend_admin()
   );
+
+create index if not exists idx_orders_created_at_desc
+  on public.orders(created_at desc);
+create index if not exists idx_store_customers_email
+  on public.store_customers(email);
+create index if not exists idx_store_reviews_status
+  on public.store_reviews(status);
+create index if not exists idx_orders_customer_email
+  on public.orders(email);
+create index if not exists idx_products_category_id
+  on public.products(category_id)
+  where is_active = true;
+create index if not exists idx_products_brand_id
+  on public.products(brand_id)
+  where is_active = true;
+create index if not exists idx_order_items_order_id
+  on public.order_items(order_id);
+create index if not exists idx_analytics_daily_metrics_day_desc
+  on public.analytics_daily_metrics(day desc);
+create index if not exists idx_analytics_events_occurred_desc
+  on public.analytics_events(occurred_at desc);
+create index if not exists idx_analytics_events_event_occurred
+  on public.analytics_events(event_name, occurred_at desc);
+create index if not exists idx_analytics_events_session
+  on public.analytics_events(session_id);
+create index if not exists idx_site_settings_key
+  on public.site_settings(key);
+create index if not exists idx_backend_users_email
+  on public.backend_users(email);
+create index if not exists idx_payment_methods_provider
+  on public.payment_methods(provider);
+create index if not exists idx_store_reviews_customer_email
+  on public.store_reviews(customer_email);
+create index if not exists idx_orders_status_date
+  on public.orders(financial_status, created_at desc);

@@ -8,13 +8,13 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- Step 2: Create vault table for encrypted credentials
 CREATE TABLE IF NOT EXISTS public.encrypted_credentials (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider_type text NOT NULL CHECK (provider_type IN ('payment_processor', 'shipping_carrier')),
+  provider_type text NOT NULL CHECK (provider_type IN ('email_server', 'payment_processor', 'shipping_carrier')),
   provider_name text NOT NULL, -- 'stripe', 'paypal', 'square', 'usps', 'ups', 'dhl', 'fedex'
   credentials_encrypted bytea NOT NULL, -- encrypted JSON
   encryption_algorithm text NOT NULL DEFAULT 'aes-256-gcm',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  created_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   UNIQUE(provider_type, provider_name)
 );
 
@@ -38,7 +38,7 @@ WITH CHECK (public.is_backend_admin());
 -- Step 6: Encryption function - Encrypts credentials before storage
 CREATE OR REPLACE FUNCTION public.encrypt_credential_value(
   p_data text,
-  p_encryption_key bytea
+  p_encryption_key_hex text
 )
 RETURNS bytea
 LANGUAGE plpgsql
@@ -50,12 +50,12 @@ DECLARE
   v_encrypted bytea;
 BEGIN
   -- Generate random IV
-  v_iv := gen_random_bytes(16);
+  v_iv := extensions.gen_random_bytes(16);
   
   -- Encrypt with AES-256-GCM
-  v_encrypted := encrypt_iv(
+  v_encrypted := extensions.encrypt_iv(
     convert_to(p_data, 'utf8'),
-    p_encryption_key,
+    decode(p_encryption_key_hex, 'hex'),
     v_iv,
     'aes'
   );
@@ -68,7 +68,7 @@ $$;
 -- Step 7: Decryption function - Decrypts credentials from storage
 CREATE OR REPLACE FUNCTION public.decrypt_credential_value(
   p_encrypted_data bytea,
-  p_encryption_key bytea
+  p_encryption_key_hex text
 )
 RETURNS text
 LANGUAGE plpgsql
@@ -87,9 +87,9 @@ BEGIN
   v_encrypted := substring(p_encrypted_data, 17);
   
   -- Decrypt
-  v_decrypted := decrypt_iv(
+  v_decrypted := extensions.decrypt_iv(
     v_encrypted,
-    p_encryption_key,
+    decode(p_encryption_key_hex, 'hex'),
     v_iv,
     'aes'
   );
@@ -104,7 +104,7 @@ CREATE OR REPLACE FUNCTION public.upsert_encrypted_credential(
   p_provider_type text,
   p_provider_name text,
   p_credentials_json text,
-  p_encryption_key bytea
+  p_encryption_key_hex text
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -123,7 +123,7 @@ BEGIN
   -- Encrypt credentials
   v_encrypted := public.encrypt_credential_value(
     p_credentials_json,
-    p_encryption_key
+    p_encryption_key_hex
   );
   
   -- Upsert credential
@@ -152,7 +152,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.get_encrypted_credential(
   p_provider_type text,
   p_provider_name text,
-  p_encryption_key bytea
+  p_encryption_key_hex text
 )
 RETURNS text
 LANGUAGE plpgsql
@@ -181,7 +181,7 @@ BEGIN
   -- Decrypt and return
   v_decrypted := public.decrypt_credential_value(
     v_encrypted,
-    p_encryption_key
+    p_encryption_key_hex
   );
   
   RETURN v_decrypted;

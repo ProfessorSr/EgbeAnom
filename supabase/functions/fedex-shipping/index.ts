@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0?target=deno';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') ?? 'https://egbeanom.com',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -18,6 +18,7 @@ if (!supabaseUrl || !serviceRoleKey) {
 const serviceClient = createClient(supabaseUrl, serviceRoleKey);
 const FEDEX_OAUTH_URL = 'https://apis.fedex.com/oauth/token';
 const FEDEX_RATES_URL = 'https://apis.fedex.com/rate/v1/rates/quotes';
+const FEDEX_SHIP_URL = 'https://apis.fedex.com/ship/v1/shipments';
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
@@ -87,6 +88,20 @@ async function requireBackendUser(request: Request) {
 }
 
 async function loadFedexSettings() {
+  const encrypted = await fetchEncryptedShippingCredential('fedex');
+  if (encrypted) {
+    return {
+      credentials: {
+        accountNumber: stringValue(encrypted.account_number),
+        meterNumber: stringValue(encrypted.meter_number),
+        apiKey: stringValue(encrypted.api_key),
+        apiSecret: stringValue(encrypted.api_secret),
+        clientId: stringValue(encrypted.client_id),
+        clientSecret: stringValue(encrypted.client_secret),
+      },
+    };
+  }
+
   const { data: providerData, error: providerError } = await serviceClient
     .from('site_settings')
     .select('value')
@@ -131,6 +146,36 @@ async function loadFedexSettings() {
       clientSecret: stringValue(raw.client_secret),
     },
   };
+}
+
+async function fetchEncryptedShippingCredential(carrier: string): Promise<Json | null> {
+  const encryptionKey = Deno.env.get('ENCRYPTION_KEY') ?? '';
+  if (!encryptionKey.trim()) {
+    return null;
+  }
+  const { data, error } = await serviceClient
+    .from('encrypted_credentials')
+    .select('credentials_encrypted')
+    .eq('provider_type', 'shipping_carrier')
+    .eq('provider_name', carrier)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Could not load encrypted ${carrier.toUpperCase()} credentials: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
+  const { data: decrypted, error: decryptError } = await serviceClient.rpc(
+    'decrypt_credential_value',
+    {
+      p_encrypted_data: data.credentials_encrypted,
+      p_encryption_key_hex: encryptionKey.trim(),
+    },
+  );
+  if (decryptError) {
+    throw new Error(`Could not decrypt ${carrier.toUpperCase()} credentials: ${decryptError.message}`);
+  }
+  return JSON.parse(stringValue(decrypted)) as Json;
 }
 
 async function fetchFedexOAuthToken(credentials: {
@@ -269,7 +314,162 @@ async function createLabel(
     throw new Error('The order is missing a complete shipping address for FedEx label creation.');
   }
 
-  throw new Error('FedEx label creation is not connected to the FedEx Ship API yet.');
+  const payload = {
+    labelResponseOptions: 'LABEL',
+    requestedShipment: {
+      shipDatestamp: new Date().toISOString().split('T')[0],
+      serviceType: fedexServiceType(stringValue(order.shipping_service), stringValue(order.shipping_priority)),
+      packagingType: 'YOUR_PACKAGING',
+      pickupType: 'DROPOFF_AT_FEDEX_LOCATION',
+      shipper: {
+        contact: {
+          personName: stringValue(storeInfo.display_name) || 'EgbeAnom',
+          phoneNumber: stringValue(storeInfo.phone),
+          companyName: stringValue(storeInfo.display_name) || 'EgbeAnom',
+        },
+        address: {
+          streetLines: [
+            stringValue(storeInfo.address_line1),
+            stringValue(storeInfo.address_line2),
+          ].filter(Boolean),
+          city: stringValue(storeInfo.city),
+          stateOrProvinceCode: stringValue(storeInfo.state),
+          postalCode: normalizeZip(stringValue(storeInfo.postal_code)),
+          countryCode: 'US',
+        },
+      },
+      recipients: [
+        {
+          contact: {
+            personName: buildRecipientName(order, address),
+            phoneNumber: stringValue(address.phone),
+            companyName: buildRecipientName(order, address),
+          },
+          address: {
+            streetLines: [
+              stringValue(address.address_line1),
+              stringValue(address.address_line2),
+            ].filter(Boolean),
+            city: stringValue(address.city),
+            stateOrProvinceCode: stringValue(address.state),
+            postalCode: normalizeZip(stringValue(address.postal_code)),
+            countryCode: 'US',
+            residential: true,
+          },
+        },
+      ],
+      shippingChargesPayment: {
+        paymentType: 'SENDER',
+        payor: {
+          responsibleParty: {
+            accountNumber: { value: credentials.accountNumber },
+          },
+        },
+      },
+      labelSpecification: {
+        imageType: 'PDF',
+        labelStockType: 'PAPER_4X6',
+      },
+      requestedPackageLineItems: [
+        {
+          weight: {
+            units: 'LB',
+            value: poundsFromOunces(numberValue(packageInfo.weightOz, 8)),
+          },
+          dimensions: {
+            length: Math.max(1, Math.ceil(numberValue(packageInfo.lengthIn, 6))),
+            width: Math.max(1, Math.ceil(numberValue(packageInfo.widthIn, 3))),
+            height: Math.max(1, Math.ceil(numberValue(packageInfo.heightIn, 3))),
+            units: 'IN',
+          },
+          customerReferences: [
+            {
+              customerReferenceType: 'CUSTOMER_REFERENCE',
+              value: stringValue(order.order_number) || stringValue(order.id),
+            },
+          ],
+        },
+      ],
+    },
+    accountNumber: {
+      value: credentials.accountNumber,
+    },
+  };
+
+  const response = await fetch(FEDEX_SHIP_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${oauthToken}`,
+      'Content-Type': 'application/json',
+      'X-locale': 'en_US',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const jsonBody = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      stringValue(jsonBody?.errors?.[0]?.message) ||
+      `FedEx label creation failed: ${response.statusText}`,
+    );
+  }
+
+  const tx = Array.isArray(jsonBody?.output?.transactionShipments)
+    ? ((jsonBody.output.transactionShipments[0] ?? {}) as Json)
+    : {};
+  const pieces = Array.isArray(tx.pieceResponses)
+    ? (tx.pieceResponses as Json[])
+    : [];
+  const piece = (pieces[0] ?? {}) as Json;
+  const docs = Array.isArray(piece.packageDocuments)
+    ? (piece.packageDocuments as Json[])
+    : [];
+  const doc = (docs[0] ?? {}) as Json;
+  const trackingNumber = stringValue(piece.trackingNumber);
+  const labelBase64 = stringValue(doc.encodedLabel);
+
+  if (!trackingNumber) {
+    throw new Error('FedEx label response did not include a tracking number.');
+  }
+  if (!labelBase64) {
+    throw new Error('FedEx label response did not include printable label content.');
+  }
+
+  return {
+    trackingNumber,
+    labelStatus: 'Label printed',
+    labelFileName: `fedex-label-${trackingNumber}.pdf`,
+    labelContentType: 'application/pdf',
+    labelBase64,
+    trackingUrl: `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`,
+    postage: numberValue(((tx.shipmentRateDetails as Json | undefined) ?? {}).totalNetCharge, 0),
+    estimatedDays: stringValue(order.shipping_service) || 'FedEx-calculated',
+  };
+}
+
+function normalizeZip(zip: string) {
+  return zip.replace(/[^0-9]/g, '').slice(0, 5);
+}
+
+function buildRecipientName(order: Json, address: Json) {
+  const first = stringValue(address.first_name).trim();
+  const last = stringValue(address.last_name).trim();
+  const full = `${first} ${last}`.trim();
+  return full || stringValue(order.customer) || 'Customer';
+}
+
+function fedexServiceType(service: string, priority: string) {
+  const text = `${service} ${priority}`.toLowerCase();
+  if (text.includes('overnight') || text.includes('next day') || text.includes('one day')) {
+    return 'STANDARD_OVERNIGHT';
+  }
+  if (text.includes('2 day') || text.includes('two day')) {
+    return 'FEDEX_2_DAY';
+  }
+  if (text.includes('ground')) {
+    return 'FEDEX_GROUND';
+  }
+  return 'FEDEX_GROUND';
 }
 
 function json(data: Json, status = 200) {

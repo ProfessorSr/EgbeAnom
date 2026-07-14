@@ -1,11 +1,11 @@
 {
-    "name": "egbeanom",
-    "short_name": "egbeanom",
-    "start_url": ".",
+    "name": "EgbeAnom Fragrance",
+    "short_name": "EgbeAnom",
+    "start_url": "/",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#121212",
+    "theme_color": "#C88F52",
+    "description": "Shop EgbeAnom Fragrance perfumes, colognes, fragrance oils, gift cards, and signature scent recommendations.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

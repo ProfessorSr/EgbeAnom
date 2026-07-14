@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0?target=deno';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') ?? 'https://egbeanom.com',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -17,6 +17,7 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const serviceClient = createClient(supabaseUrl, serviceRoleKey);
 const DHL_RATINGS_URL = 'https://express.api.dhl.com/mydhl/in/shipments/rates';
+const DHL_SHIPMENTS_URL = 'https://express.api.dhl.com/mydhlapi/shipments';
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
@@ -83,6 +84,20 @@ async function requireBackendUser(request: Request) {
 }
 
 async function loadDhlSettings() {
+  const encrypted = await fetchEncryptedShippingCredential('dhl');
+  if (encrypted) {
+    return {
+      credentials: {
+        accountNumber: stringValue(encrypted.account_number),
+        siteId: stringValue(encrypted.site_id),
+        apiKey: stringValue(encrypted.api_key),
+        apiPassword: stringValue(encrypted.api_password),
+        clientId: stringValue(encrypted.client_id),
+        clientSecret: stringValue(encrypted.client_secret),
+      },
+    };
+  }
+
   const { data: providerData, error: providerError } = await serviceClient
     .from('site_settings')
     .select('value')
@@ -127,6 +142,36 @@ async function loadDhlSettings() {
       clientSecret: stringValue(raw.client_secret),
     },
   };
+}
+
+async function fetchEncryptedShippingCredential(carrier: string): Promise<Json | null> {
+  const encryptionKey = Deno.env.get('ENCRYPTION_KEY') ?? '';
+  if (!encryptionKey.trim()) {
+    return null;
+  }
+  const { data, error } = await serviceClient
+    .from('encrypted_credentials')
+    .select('credentials_encrypted')
+    .eq('provider_type', 'shipping_carrier')
+    .eq('provider_name', carrier)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Could not load encrypted ${carrier.toUpperCase()} credentials: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
+  const { data: decrypted, error: decryptError } = await serviceClient.rpc(
+    'decrypt_credential_value',
+    {
+      p_encrypted_data: data.credentials_encrypted,
+      p_encryption_key_hex: encryptionKey.trim(),
+    },
+  );
+  if (decryptError) {
+    throw new Error(`Could not decrypt ${carrier.toUpperCase()} credentials: ${decryptError.message}`);
+  }
+  return JSON.parse(stringValue(decrypted)) as Json;
 }
 
 async function quoteRates(
@@ -216,10 +261,13 @@ async function createLabel(
   packageInfo: Json,
   credentials: {
     accountNumber: string;
+    siteId: string;
+    apiPassword: string;
+    apiKey: string;
   },
 ) {
-  if (!credentials.accountNumber) {
-    throw new Error('DHL account number is required for label creation.');
+  if (!credentials.accountNumber || !credentials.apiKey) {
+    throw new Error('DHL account number and API key are required for label creation.');
   }
 
   const address = ((order.shipping_address as Json | undefined) ?? {}) as Json;
@@ -227,7 +275,147 @@ async function createLabel(
     throw new Error('The order is missing a complete shipping address for DHL label creation.');
   }
 
-  throw new Error('DHL label creation is not connected to the DHL Shipment API yet.');
+  const payload = {
+    plannedShippingDateAndTime: new Date().toISOString(),
+    pickup: {
+      isRequested: false,
+    },
+    productCode: dhlProductCode(stringValue(order.shipping_service), stringValue(order.shipping_priority)),
+    accounts: [
+      {
+        typeCode: 'shipper',
+        number: credentials.accountNumber,
+      },
+    ],
+    customerDetails: {
+      shipperDetails: {
+        postalAddress: {
+          addressLine1: stringValue(storeInfo.address_line1),
+          addressLine2: stringValue(storeInfo.address_line2),
+          cityName: stringValue(storeInfo.city),
+          postalCode: normalizeZip(stringValue(storeInfo.postal_code)),
+          provinceCode: stringValue(storeInfo.state),
+          countryCode: 'US',
+        },
+        contactInformation: {
+          fullName: stringValue(storeInfo.display_name) || 'EgbeAnom',
+          companyName: stringValue(storeInfo.display_name) || 'EgbeAnom',
+          phone: stringValue(storeInfo.phone),
+          email: stringValue(storeInfo.email),
+        },
+      },
+      receiverDetails: {
+        postalAddress: {
+          addressLine1: stringValue(address.address_line1),
+          addressLine2: stringValue(address.address_line2),
+          cityName: stringValue(address.city),
+          postalCode: normalizeZip(stringValue(address.postal_code)),
+          provinceCode: stringValue(address.state),
+          countryCode: 'US',
+        },
+        contactInformation: {
+          fullName: buildRecipientName(order, address),
+          companyName: buildRecipientName(order, address),
+          phone: stringValue(address.phone),
+          email: stringValue(address.email) || stringValue(order.email),
+        },
+      },
+    },
+    content: {
+      packages: [
+        {
+          weight: poundsFromOunces(numberValue(packageInfo.weightOz, 8)),
+          dimensions: {
+            length: Math.max(1, Math.ceil(numberValue(packageInfo.lengthIn, 6))),
+            width: Math.max(1, Math.ceil(numberValue(packageInfo.widthIn, 3))),
+            height: Math.max(1, Math.ceil(numberValue(packageInfo.heightIn, 3))),
+          },
+        },
+      ],
+      isCustomsDeclarable: false,
+      description: `Order ${stringValue(order.order_number) || stringValue(order.id)}`,
+    },
+    outputImageProperties: {
+      printerDPI: 300,
+      encodingFormat: 'pdf',
+      imageOptions: [{ typeCode: 'label', templateName: 'ECOM26_84_A4_001' }],
+    },
+    customerReferences: [
+      {
+        value: stringValue(order.order_number) || stringValue(order.id),
+        typeCode: 'CU',
+      },
+    ],
+  };
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'DHL-API-Key': credentials.apiKey,
+  };
+  if (credentials.siteId && credentials.apiPassword) {
+    headers.Authorization = `Basic ${btoa(`${credentials.siteId}:${credentials.apiPassword}`)}`;
+  }
+
+  const response = await fetch(DHL_SHIPMENTS_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const jsonBody = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      stringValue(jsonBody?.detail) ||
+      stringValue(jsonBody?.message) ||
+      `DHL label creation failed: ${response.statusText}`,
+    );
+  }
+
+  const trackingNumber =
+    stringValue(jsonBody?.shipmentTrackingNumber) ||
+    stringValue((jsonBody?.packages?.[0] ?? {}).trackingNumber);
+  const docs = Array.isArray(jsonBody?.documents) ? (jsonBody.documents as Json[]) : [];
+  const labelDoc = docs.find((doc) => stringValue(doc.typeCode).toLowerCase() === 'label') ?? docs[0] ?? {};
+  const labelBase64 = stringValue(labelDoc.content);
+  if (!trackingNumber) {
+    throw new Error('DHL label response did not include a tracking number.');
+  }
+  if (!labelBase64) {
+    throw new Error('DHL label response did not include printable label content.');
+  }
+
+  return {
+    trackingNumber,
+    labelStatus: 'Label printed',
+    labelFileName: stringValue(labelDoc.fileName) || `dhl-label-${trackingNumber}.pdf`,
+    labelContentType: 'application/pdf',
+    labelBase64,
+    trackingUrl: `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${encodeURIComponent(trackingNumber)}`,
+    postage: numberValue((jsonBody?.shipmentCharges ?? {}).totalPrice, 0),
+    estimatedDays: stringValue(order.shipping_service) || 'DHL-calculated',
+  };
+}
+
+function normalizeZip(zip: string) {
+  return zip.replace(/[^0-9]/g, '').slice(0, 5);
+}
+
+function buildRecipientName(order: Json, address: Json) {
+  const first = stringValue(address.first_name).trim();
+  const last = stringValue(address.last_name).trim();
+  const full = `${first} ${last}`.trim();
+  return full || stringValue(order.customer) || 'Customer';
+}
+
+function dhlProductCode(service: string, priority: string) {
+  const text = `${service} ${priority}`.toLowerCase();
+  if (text.includes('express') || text.includes('overnight') || text.includes('one day')) {
+    return 'N';
+  }
+  if (text.includes('ground') || text.includes('standard')) {
+    return 'G';
+  }
+  return 'N';
 }
 
 function json(data: Json, status = 200) {

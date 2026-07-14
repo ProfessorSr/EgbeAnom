@@ -43,6 +43,29 @@ void trackGoogleAnalyticsPage(String pageName) {
   script.remove();
 }
 
+void trackGoogleAnalyticsEvent(
+  String eventName, {
+  String page = '',
+  double value = 0,
+  String currency = 'USD',
+  String itemName = '',
+  String orderId = '',
+}) {
+  if (_measurementId.isEmpty) {
+    return;
+  }
+  final cleanEvent = eventName.replaceAll("'", r"\'");
+  final cleanPage = page.replaceAll("'", r"\'");
+  final cleanCurrency = currency.replaceAll("'", r"\'");
+  final cleanItem = itemName.replaceAll("'", r"\'");
+  final cleanOrder = orderId.replaceAll("'", r"\'");
+  final script = html.ScriptElement()
+    ..text =
+        "window.gtag && window.gtag('event', '$cleanEvent', {page_title: '$cleanPage', value: $value, currency: '$cleanCurrency', item_name: '$cleanItem', transaction_id: '$cleanOrder'});";
+  html.document.body?.append(script);
+  script.remove();
+}
+
 String currentTrafficReferrer() {
   final referrer = html.document.referrer.trim();
   if (referrer.isEmpty) {

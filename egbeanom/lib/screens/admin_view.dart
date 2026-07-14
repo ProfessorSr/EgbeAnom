@@ -54,6 +54,7 @@ class AdminView extends StatefulWidget {
     required this.measurementSystem,
     required this.backendUsers,
     required this.activeUserSessions,
+    required this.analyticsEvents,
     required this.emailSettings,
     required this.onSave,
     required this.onRemove,
@@ -108,6 +109,7 @@ class AdminView extends StatefulWidget {
   final MeasurementSystem measurementSystem;
   final List<BackendUser> backendUsers;
   final List<ActiveUserSession> activeUserSessions;
+  final List<AnalyticsEvent> analyticsEvents;
   final EmailServerSettings emailSettings;
   final AsyncValueChanged<Fragrance> onSave;
   final ProductRemoveCallback onRemove;
@@ -347,6 +349,7 @@ class _AdminViewState extends State<AdminView> {
         orders: widget.orders,
         shippingOptions: widget.shippingOptions,
         storeInfo: widget.storeInfo,
+        siteStatus: widget.siteStatus,
         onUpdateOrder: widget.onUpdateOrder,
         onCreateShippingLabel: widget.onCreateShippingLabel,
         onBatchUpdateOrders: widget.onBatchUpdateOrders,
@@ -354,6 +357,8 @@ class _AdminViewState extends State<AdminView> {
       AdminSection.invoices => _InvoicesSection(
         orders: widget.orders,
         storeInfo: widget.storeInfo,
+        siteStatus: widget.siteStatus,
+        onUpdateOrder: widget.onUpdateOrder,
       ),
       AdminSection.reviews => _ReviewsSection(
         reviews: widget.reviews,
@@ -394,8 +399,11 @@ class _AdminViewState extends State<AdminView> {
         dailyMetrics: widget.dailyMetrics,
         products: widget.products,
         orders: widget.orders,
+        reviews: widget.reviews,
+        events: widget.analyticsEvents,
         activeCarts: widget.activeCarts,
         conversionRate: _conversionRate,
+        onOpenSection: (section) => setState(() => _section = section),
       ),
       AdminSection.reports => _ReportsSection(
         dailyMetrics: widget.dailyMetrics,
@@ -552,6 +560,7 @@ class _AdminSectionBar extends StatelessWidget {
       (AdminSection.reviews, Icons.reviews_outlined, 'Reviews'),
       (AdminSection.notifications, Icons.notifications_outlined, 'Alerts'),
       (AdminSection.email, Icons.outgoing_mail, 'Email'),
+      (AdminSection.analytics, Icons.analytics_outlined, 'Analytics'),
       (AdminSection.site, Icons.toggle_on_outlined, 'Site'),
       (
         AdminSection.storeInfo,
@@ -560,7 +569,7 @@ class _AdminSectionBar extends StatelessWidget {
       ),
       (AdminSection.taxes, Icons.request_quote_outlined, 'Taxes'),
       (AdminSection.backendUsers, Icons.admin_panel_settings_outlined, 'Users'),
-      (AdminSection.reports, Icons.query_stats, 'Reports'),
+      (AdminSection.reports, Icons.file_download_outlined, 'Reports'),
     ];
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -801,37 +810,6 @@ class _AdminOverviewState extends State<_AdminOverview> {
           onOpenSection: widget.onOpenSection,
         ),
         const SizedBox(height: 18),
-        Text(
-          'Trend charts',
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: Colors.white),
-        ),
-        const SizedBox(height: 8),
-        _DashboardChartGrid(
-          products: widget.products,
-          dailyMetrics: _windowMetrics,
-          activeCarts: widget.activeCarts,
-          onOpenSection: widget.onOpenSection,
-        ),
-        const SizedBox(height: 18),
-        Text(
-          'Operational insights',
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: Colors.white),
-        ),
-        const SizedBox(height: 8),
-        _CommerceDashboardPanels(
-          products: widget.products,
-          metrics: _windowMetrics,
-          activeCarts: widget.activeCarts,
-          sessions: widget.sessions,
-          orders: widget.orders,
-          reviews: widget.reviews,
-          onOpenSection: widget.onOpenSection,
-        ),
-        const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth > 920;
@@ -841,9 +819,8 @@ class _AdminOverviewState extends State<_AdminOverview> {
               children: [
                 Expanded(
                   flex: wide ? 6 : 0,
-                  child: _DailyTrendPanel(
-                    metrics: _windowMetrics,
-                    onTap: () => widget.onOpenSection(AdminSection.reports),
+                  child: _OverviewQuickLinks(
+                    onOpenSection: widget.onOpenSection,
                   ),
                 ),
                 if (wide)
@@ -868,12 +845,19 @@ class _AdminOverviewState extends State<_AdminOverview> {
 }
 
 class _MetricData {
-  const _MetricData(this.icon, this.label, this.value, {this.targetSection});
+  const _MetricData(
+    this.icon,
+    this.label,
+    this.value, {
+    this.targetSection,
+    this.onTap,
+  });
 
   final IconData icon;
   final String label;
   final String value;
   final AdminSection? targetSection;
+  final VoidCallback? onTap;
 }
 
 class _RangeSelect extends StatelessWidget {
@@ -918,15 +902,76 @@ class _RangeSelect extends StatelessWidget {
   }
 }
 
+class _OverviewQuickLinks extends StatelessWidget {
+  const _OverviewQuickLinks({required this.onOpenSection});
+
+  final ValueChanged<AdminSection> onOpenSection;
+
+  @override
+  Widget build(BuildContext context) {
+    final links = [
+      (
+        Icons.receipt_long_outlined,
+        'Orders',
+        'Review new orders and fulfillment status.',
+        AdminSection.orders,
+      ),
+      (
+        Icons.analytics_outlined,
+        'Analytics',
+        'Open detailed traffic, source, page, and ecommerce analytics.',
+        AdminSection.analytics,
+      ),
+      (
+        Icons.file_download_outlined,
+        'Reports',
+        'Export sales, tax, product, and customer tables.',
+        AdminSection.reports,
+      ),
+      (
+        Icons.inventory_2_outlined,
+        'Inventory',
+        'Check stock, low-stock items, and print inventory.',
+        AdminSection.inventory,
+      ),
+      (
+        Icons.outgoing_mail,
+        'Email',
+        'Send test emails and manage customer notices.',
+        AdminSection.email,
+      ),
+    ];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Quick actions',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            for (final link in links)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(link.$1),
+                title: Text(link.$2),
+                subtitle: Text(link.$3),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => onOpenSection(link.$4),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({
-    required this.metrics,
-    this.tall = false,
-    this.onOpenSection,
-  });
+  const _MetricGrid({required this.metrics, this.onOpenSection});
 
   final List<_MetricData> metrics;
-  final bool tall;
   final ValueChanged<AdminSection>? onOpenSection;
 
   @override
@@ -944,18 +989,18 @@ class _MetricGrid extends StatelessWidget {
           crossAxisCount: columns,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: tall
-              ? (columns == 4 ? 1.45 : 1.25)
-              : (columns == 4 ? 3.1 : 2.4),
+          childAspectRatio: columns == 4 ? 3.1 : 2.4,
           children: [
             for (final metric in metrics)
               _MetricCard(
                 icon: metric.icon,
                 label: metric.label,
                 value: metric.value,
-                onTap: metric.targetSection == null || onOpenSection == null
-                    ? null
-                    : () => onOpenSection!(metric.targetSection!),
+                onTap:
+                    metric.onTap ??
+                    (metric.targetSection == null || onOpenSection == null
+                        ? null
+                        : () => onOpenSection!(metric.targetSection!)),
               ),
           ],
         );
@@ -2534,6 +2579,8 @@ class _PromotionsSectionState extends State<_PromotionsSection> {
                                         '${coupon.value.toStringAsFixed(0)}%',
                                       'Buy X get Y' =>
                                         'Buy ${coupon.buyQuantity}, get ${coupon.getQuantity} @ ${currency(coupon.getPrice)}',
+                                      'Gift card' =>
+                                        '${currency(coupon.remainingBalance)} remaining',
                                       _ => currency(coupon.value),
                                     }),
                                   ),
@@ -2623,6 +2670,8 @@ class _PromotionsSectionState extends State<_PromotionsSection> {
           buyQuantity: coupon.buyQuantity,
           getQuantity: coupon.getQuantity,
           getPrice: coupon.getPrice,
+          remainingBalance: coupon.remainingBalance,
+          recipientEmail: coupon.recipientEmail,
           isActive: archived ? false : coupon.isActive,
           isArchived: archived,
         ),
@@ -2678,6 +2727,8 @@ class _CouponEditorState extends State<CouponEditor> {
   late TextEditingController _buyQuantity;
   late TextEditingController _getQuantity;
   late TextEditingController _getPrice;
+  late TextEditingController _remainingBalance;
+  late TextEditingController _recipientEmail;
   late String _type;
   bool _active = true;
   bool _saving = false;
@@ -2714,6 +2765,12 @@ class _CouponEditorState extends State<CouponEditor> {
       text: '${widget.coupon?.getQuantity ?? 1}',
     );
     _getPrice = TextEditingController(text: '${widget.coupon?.getPrice ?? 0}');
+    _remainingBalance = TextEditingController(
+      text: '${widget.coupon?.remainingBalance ?? widget.coupon?.value ?? 0}',
+    );
+    _recipientEmail = TextEditingController(
+      text: widget.coupon?.recipientEmail ?? '',
+    );
     _type = widget.coupon?.type ?? 'Percent';
     _active = widget.coupon?.isActive ?? true;
   }
@@ -2727,6 +2784,8 @@ class _CouponEditorState extends State<CouponEditor> {
     _buyQuantity.dispose();
     _getQuantity.dispose();
     _getPrice.dispose();
+    _remainingBalance.dispose();
+    _recipientEmail.dispose();
   }
 
   @override
@@ -2775,6 +2834,7 @@ class _CouponEditorState extends State<CouponEditor> {
                   value: 'Buy X get Y',
                   child: Text('Buy X get Y'),
                 ),
+                DropdownMenuItem(value: 'Gift card', child: Text('Gift card')),
               ],
               onChanged: (value) => setState(() => _type = value ?? _type),
             ),
@@ -2831,6 +2891,32 @@ class _CouponEditorState extends State<CouponEditor> {
                         labelText: 'Get item price',
                       ),
                       keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (_type == 'Gift card') ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _remainingBalance,
+                      decoration: const InputDecoration(
+                        labelText: 'Remaining balance',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _recipientEmail,
+                      decoration: const InputDecoration(
+                        labelText: 'Recipient email',
+                      ),
+                      keyboardType: TextInputType.emailAddress,
                     ),
                   ),
                 ],
@@ -2897,6 +2983,12 @@ class _CouponEditorState extends State<CouponEditor> {
           buyQuantity: int.tryParse(_buyQuantity.text) ?? 0,
           getQuantity: int.tryParse(_getQuantity.text) ?? 0,
           getPrice: double.tryParse(_getPrice.text) ?? 0,
+          remainingBalance: _type == 'Gift card'
+              ? double.tryParse(_remainingBalance.text) ??
+                    double.tryParse(_value.text) ??
+                    0
+              : 0,
+          recipientEmail: _recipientEmail.text.trim().toLowerCase(),
           isActive: _active,
           isArchived: widget.coupon?.isArchived ?? false,
         ),
@@ -3037,6 +3129,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
   late TextEditingController _publicKey;
   late TextEditingController _merchantId;
   late TextEditingController _apiSecret;
+  late TextEditingController _checkoutUrl;
   late TextEditingController _webhookUrl;
   late TextEditingController _descriptor;
   late String _mode;
@@ -3061,6 +3154,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
     _publicKey = TextEditingController(text: method?.publicKey ?? '');
     _merchantId = TextEditingController(text: method?.merchantId ?? '');
     _apiSecret = TextEditingController(text: method?.apiSecret ?? '');
+    _checkoutUrl = TextEditingController(text: method?.checkoutUrl ?? '');
     _webhookUrl = TextEditingController(text: method?.webhookUrl ?? '');
     _descriptor = TextEditingController(
       text: method?.statementDescriptor ?? 'EGBE ANOM',
@@ -3072,6 +3166,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
     _publicKey.dispose();
     _merchantId.dispose();
     _apiSecret.dispose();
+    _checkoutUrl.dispose();
     _webhookUrl.dispose();
     _descriptor.dispose();
   }
@@ -3145,10 +3240,20 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
             ),
             const SizedBox(height: 10),
             TextField(
+              controller: _checkoutUrl,
+              decoration: InputDecoration(
+                labelText: labels.checkoutUrl,
+                helperText: labels.returnUrls,
+                prefixIcon: const Icon(Icons.open_in_new_outlined),
+              ),
+              keyboardType: TextInputType.url,
+            ),
+            const SizedBox(height: 10),
+            TextField(
               controller: _webhookUrl,
               decoration: InputDecoration(
                 labelText: labels.webhook,
-                helperText: labels.returnUrls,
+                helperText: labels.webhookHelp,
                 prefixIcon: const Icon(Icons.webhook_outlined),
               ),
               keyboardType: TextInputType.url,
@@ -3181,6 +3286,7 @@ class _PaymentMethodEditorState extends State<_PaymentMethodEditor> {
                   publicKey: _publicKey.text.trim(),
                   merchantId: _merchantId.text.trim(),
                   apiSecret: _apiSecret.text.trim(),
+                  checkoutUrl: _checkoutUrl.text.trim(),
                   webhookUrl: _webhookUrl.text.trim(),
                   statementDescriptor: _descriptor.text.trim(),
                 ),
@@ -3200,7 +3306,9 @@ class _PaymentProviderLabels {
     required this.publicKey,
     required this.merchantId,
     required this.apiSecret,
+    required this.checkoutUrl,
     required this.webhook,
+    required this.webhookHelp,
     required this.descriptor,
     required this.returnUrls,
     required this.instructions,
@@ -3209,7 +3317,9 @@ class _PaymentProviderLabels {
   final String publicKey;
   final String merchantId;
   final String apiSecret;
+  final String checkoutUrl;
   final String webhook;
+  final String webhookHelp;
   final String descriptor;
   final String returnUrls;
   final String instructions;
@@ -3220,7 +3330,10 @@ class _PaymentProviderLabels {
         publicKey: 'Stripe publishable key',
         merchantId: 'Stripe account ID',
         apiSecret: 'Stripe secret key',
-        webhook: 'Stripe webhook endpoint',
+        checkoutUrl: 'Stripe Checkout URL (customer redirect)',
+        webhook: 'Stripe webhook endpoint (server callback)',
+        webhookHelp:
+            'Endpoint URL only. Put the whsec_... signing secret in Supabase function secret STRIPE_WEBHOOK_SECRET.',
         descriptor: 'Stripe statement descriptor',
         returnUrls:
             'Success: /?payment=success or /payment-success • Cancel: /?payment=failed or /payment-failed',
@@ -3233,7 +3346,10 @@ class _PaymentProviderLabels {
         publicKey: 'PayPal client ID',
         merchantId: 'PayPal merchant ID',
         apiSecret: 'PayPal client secret',
+        checkoutUrl: 'PayPal approval URL (customer redirect)',
         webhook: 'PayPal webhook ID / endpoint',
+        webhookHelp:
+            'Use the callback endpoint URL/ID only. Keep verification secrets in server-side function secrets.',
         descriptor: 'PayPal invoice prefix',
         returnUrls:
             'Return URL: /?payment=success • Cancel URL: /?payment=failed',
@@ -3246,7 +3362,10 @@ class _PaymentProviderLabels {
         publicKey: 'Square application ID',
         merchantId: 'Square location ID',
         apiSecret: 'Square access token',
+        checkoutUrl: 'Square checkout URL (customer redirect)',
         webhook: 'Square webhook signature key / endpoint',
+        webhookHelp:
+            'Use the callback endpoint URL only. Keep signature keys in server-side function secrets.',
         descriptor: 'Square statement descriptor',
         returnUrls:
             'Square Web Payments SDK should return to /payment-success or /payment-failed after backend capture.',
@@ -3259,7 +3378,10 @@ class _PaymentProviderLabels {
         publicKey: 'Wallet merchant identifier',
         merchantId: 'Processor merchant account',
         apiSecret: 'Processor certificate or token',
-        webhook: 'Wallet processor callback',
+        checkoutUrl: 'Wallet checkout URL (customer redirect)',
+        webhook: 'Wallet processor callback endpoint',
+        webhookHelp:
+            'Use callback endpoint only. Store signing/verification secrets in server-side function secrets.',
         descriptor: 'Wallet display name',
         returnUrls:
             'Wallet authorization should resolve to /payment-success or /payment-failed after backend capture.',
@@ -3271,7 +3393,10 @@ class _PaymentProviderLabels {
       publicKey: 'Provider public key / client ID',
       merchantId: 'Provider merchant account ID',
       apiSecret: 'Provider secret key or API token',
-      webhook: 'Provider webhook endpoint',
+      checkoutUrl: 'Provider checkout URL (customer redirect)',
+      webhook: 'Provider webhook endpoint (server callback)',
+      webhookHelp:
+          'Endpoint URL only. Keep webhook/signing secrets in server-side function secrets.',
       descriptor: 'Statement descriptor',
       returnUrls:
           'Success: /payment-success or /?payment=success • Failure: /payment-failed or /?payment=failed',
@@ -5184,8 +5309,10 @@ class _CustomerProfilePanel extends StatelessWidget {
 void _showInvoiceDialog(
   BuildContext context,
   Order order,
-  StoreInfo storeInfo,
-) {
+  StoreInfo storeInfo, [
+  String? returnPolicyText,
+  AsyncValueChanged<Order>? onUpdateOrder,
+]) {
   showDialog<void>(
     context: context,
     builder: (context) => Dialog(
@@ -5196,13 +5323,27 @@ void _showInvoiceDialog(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _InvoiceDocumentPreview(order: order, storeInfo: storeInfo),
+              _InvoiceDocumentPreview(
+                order: order,
+                storeInfo: storeInfo,
+                returnPolicyText: returnPolicyText,
+              ),
               const SizedBox(height: 12),
               FilledButton.icon(
-                onPressed: () => printHtmlDocument(
-                  'Invoice ${order.id}',
-                  _invoiceHtml(order, storeInfo),
-                ),
+                onPressed: () {
+                  order
+                    ..status = 'Invoice created'
+                    ..fulfillmentStatus = 'Invoice created';
+                  onUpdateOrder?.call(order);
+                  printHtmlDocument(
+                    'Invoice ${order.id}',
+                    _invoiceHtml(
+                      order,
+                      storeInfo,
+                      returnPolicyText: returnPolicyText,
+                    ),
+                  );
+                },
                 icon: const Icon(Icons.print_outlined),
                 label: const Text('Print invoice'),
               ),
@@ -5263,6 +5404,7 @@ class _OrdersSection extends StatefulWidget {
     required this.orders,
     required this.shippingOptions,
     required this.storeInfo,
+    required this.siteStatus,
     required this.onUpdateOrder,
     required this.onCreateShippingLabel,
     required this.onBatchUpdateOrders,
@@ -5271,6 +5413,7 @@ class _OrdersSection extends StatefulWidget {
   final List<Order> orders;
   final List<ShippingOption> shippingOptions;
   final StoreInfo storeInfo;
+  final SiteStatus siteStatus;
   final AsyncValueChanged<Order> onUpdateOrder;
   final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
   final void Function(
@@ -5285,138 +5428,45 @@ class _OrdersSection extends StatefulWidget {
 }
 
 class _OrdersSectionState extends State<_OrdersSection> {
-  final Set<String> _selectedOrderIds = {};
+  final Set<String> _selectedOrderKeys = {};
   String _shippingFilter = 'All';
+  String _paymentFilter = 'All';
   String _statusFilter = 'All';
   String _batchAction = 'Print Pack List';
   String _printPacket = '';
   bool _isApplyingBatchAction = false;
 
-  static const List<String> _shippingFilters = [
-    'All',
-    'Standard',
-    'Priority',
-    'Priority One Day',
-    'Ground',
-  ];
+  static const List<String> _shippingFilters =
+      AdminOrderWorkflow.shippingFilters;
+  static const List<String> _statusFilters = AdminOrderWorkflow.statusFilters;
+  static const List<String> _paymentFilters = AdminOrderWorkflow.paymentFilters;
 
-  static const List<String> _statusFilters = [
-    'All',
-    'Pending',
-    'Processing',
-    'Label printed',
-    'Sent',
-    'Delivered',
-  ];
+  List<Order> get _visibleOrders => AdminOrderWorkflow.visibleOrders(
+    widget.orders,
+    shippingFilter: _shippingFilter,
+    paymentFilter: _paymentFilter,
+    statusFilter: _statusFilter,
+  );
 
-  List<Order> get _visibleOrders {
-    final orders = widget.orders.where((order) {
-      return _matchesShippingFilter(order) && _matchesStatusFilter(order);
-    }).toList();
+  List<Order> _unpaidOrders(List<Order> orders) =>
+      AdminOrderWorkflow.unpaidOrders(orders);
 
-    orders.sort((a, b) {
-      final shippingCompare = _shippingRank(a).compareTo(_shippingRank(b));
-      if (shippingCompare != 0) {
-        return shippingCompare;
-      }
-      final statusCompare = _statusRank(a).compareTo(_statusRank(b));
-      if (statusCompare != 0) {
-        return statusCompare;
-      }
-      return (b.createdAt ?? DateTime(2000)).compareTo(
-        a.createdAt ?? DateTime(2000),
-      );
-    });
-    return orders;
-  }
-
-  bool _matchesShippingFilter(Order order) {
-    if (_shippingFilter == 'All') {
-      return true;
-    }
-    return _shippingType(order) == _shippingFilter;
-  }
-
-  bool _matchesStatusFilter(Order order) {
-    if (_statusFilter == 'All') {
-      return true;
-    }
-    return _workflowStatus(order) == _statusFilter;
-  }
-
-  int _shippingRank(Order order) {
-    final type = _shippingType(order);
-    final index = _shippingFilters.indexOf(type);
-    return index == -1 ? _shippingFilters.length : index;
-  }
-
-  int _statusRank(Order order) {
-    final status = _workflowStatus(order);
-    final index = _statusFilters.indexOf(status);
-    return index == -1 ? _statusFilters.length : index;
-  }
-
-  String _shippingType(Order order) {
-    final text =
-        '${order.shippingPriority} ${order.shippingCarrier} ${order.shippingService}'
-            .toLowerCase();
-    if (text.contains('one day') ||
-        text.contains('1 day') ||
-        text.contains('overnight') ||
-        text.contains('express')) {
-      return 'Priority One Day';
-    }
-    if (text.contains('priority')) {
-      return 'Priority';
-    }
-    if (text.contains('ground')) {
-      return 'Ground';
-    }
-    return 'Standard';
-  }
-
-  String _workflowStatus(Order order) {
-    final fulfillment = order.fulfillmentStatus.toLowerCase();
-    final status = order.status.toLowerCase();
-    final label = order.labelStatus.toLowerCase();
-
-    if (fulfillment == 'delivered' || status == 'delivered') {
-      return 'Delivered';
-    }
-    if (fulfillment == 'sent' ||
-        fulfillment == 'shipped' ||
-        status == 'sent' ||
-        status == 'shipped') {
-      return 'Sent';
-    }
-    if (fulfillment == 'label printed' ||
-        fulfillment == 'label created' ||
-        label == 'label printed' ||
-        label == 'label created') {
-      return 'Label printed';
-    }
-    if (fulfillment == 'processing' ||
-        fulfillment == 'being picked' ||
-        fulfillment == 'packing' ||
-        status == 'processing' ||
-        status == 'picking') {
-      return 'Processing';
-    }
-    return 'Pending';
+  String _orderSelectionKey(Order order) {
+    return '${order.id}|${identityHashCode(order)}';
   }
 
   List<Order> get _selectedOrders => widget.orders
-      .where((order) => _selectedOrderIds.contains(order.id))
+      .where((order) => _selectedOrderKeys.contains(_orderSelectionKey(order)))
       .toList();
 
   void _toggleAll(bool? selected) {
     setState(() {
       if (selected == true) {
-        _selectedOrderIds
+        _selectedOrderKeys
           ..clear()
-          ..addAll(_visibleOrders.map((order) => order.id));
+          ..addAll(_visibleOrders.map(_orderSelectionKey));
       } else {
-        _selectedOrderIds.clear();
+        _selectedOrderKeys.clear();
       }
     });
   }
@@ -5424,6 +5474,11 @@ class _OrdersSectionState extends State<_OrdersSection> {
   void _printSelected() {
     final orders = _selectedOrders;
     if (orders.isEmpty) {
+      return;
+    }
+    final unpaid = _unpaidOrders(orders);
+    if (unpaid.isNotEmpty) {
+      _showUnpaidSelectionWarning(unpaid, 'print pack lists');
       return;
     }
     widget.onBatchUpdateOrders(orders, 'Processing', 'Not requested');
@@ -5441,9 +5496,22 @@ class _OrdersSectionState extends State<_OrdersSection> {
     if (orders.isEmpty) {
       return;
     }
+    final unpaid = _unpaidOrders(orders);
+    if (unpaid.isNotEmpty) {
+      _showUnpaidSelectionWarning(unpaid, 'print invoices');
+      return;
+    }
     final packet = orders
-        .map((order) => _invoiceHtml(order, widget.storeInfo, printLite: true))
+        .map(
+          (order) => _invoiceHtml(
+            order,
+            widget.storeInfo,
+            printLite: true,
+            returnPolicyText: widget.siteStatus.returnPolicy,
+          ),
+        )
         .join('\n');
+    widget.onBatchUpdateOrders(orders, 'Invoice created', 'Not requested');
     setState(() {
       _printPacket = orders.map(_buildInvoicePacket).join('\n\n');
     });
@@ -5453,6 +5521,11 @@ class _OrdersSectionState extends State<_OrdersSection> {
   Future<void> _printShippingLabels() async {
     final orders = _selectedOrders;
     if (orders.isEmpty || _isApplyingBatchAction) {
+      return;
+    }
+    final unpaid = _unpaidOrders(orders);
+    if (unpaid.isNotEmpty) {
+      _showUnpaidSelectionWarning(unpaid, 'print labels');
       return;
     }
 
@@ -5476,15 +5549,15 @@ class _OrdersSectionState extends State<_OrdersSection> {
     }
 
     if (completed.isNotEmpty) {
-      widget.onBatchUpdateOrders(completed, 'Label printed', 'Label printed');
+      widget.onBatchUpdateOrders(completed, 'Label created', 'Label created');
     }
 
     setState(() {
       _isApplyingBatchAction = false;
       _printPacket = _buildStatusPacket(
         completed,
-        'Label printed',
-        'Label printed',
+        'Label created',
+        'Label created',
       );
     });
 
@@ -5493,7 +5566,7 @@ class _OrdersSectionState extends State<_OrdersSection> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'Printed ${completed.length} label(s). Status set to Label printed and customer email queued.',
+            'Created ${completed.length} label(s). Status set to Label created and customer email queued.',
           ),
         ),
       );
@@ -5514,22 +5587,44 @@ class _OrdersSectionState extends State<_OrdersSection> {
     if (orders.isEmpty) {
       return;
     }
+    final unpaid = _unpaidOrders(orders);
+    if (unpaid.isNotEmpty &&
+        (fulfillmentStatus == 'Sent' ||
+            fulfillmentStatus == 'Shipped' ||
+            fulfillmentStatus == 'Label created')) {
+      _showUnpaidSelectionWarning(unpaid, 'update fulfillment');
+      return;
+    }
     widget.onBatchUpdateOrders(orders, fulfillmentStatus, labelStatus);
     setState(() {
       _printPacket = _buildStatusPacket(orders, fulfillmentStatus, labelStatus);
     });
   }
 
+  void _showUnpaidSelectionWarning(List<Order> unpaid, String action) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Cannot $action for unpaid order(s): ${unpaid.map((order) => order.id).join(', ')}',
+        ),
+      ),
+    );
+  }
+
   Future<void> _applyBatchAction() async {
     switch (_batchAction) {
       case 'Print Invoice':
         _printInvoices();
+        break;
       case 'Print Pack List':
         _printSelected();
+        break;
       case 'Print label':
         await _printShippingLabels();
+        break;
       case 'Sent':
-        _batchStatus('Sent', 'Sent');
+        _batchStatus('Shipped', 'Sent');
+        break;
     }
   }
 
@@ -5622,7 +5717,9 @@ class _OrdersSectionState extends State<_OrdersSection> {
     final visibleOrders = _visibleOrders;
     final allVisibleSelected =
         visibleOrders.isNotEmpty &&
-        visibleOrders.every((order) => _selectedOrderIds.contains(order.id));
+        visibleOrders.every(
+          (order) => _selectedOrderKeys.contains(_orderSelectionKey(order)),
+        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5632,22 +5729,27 @@ class _OrdersSectionState extends State<_OrdersSection> {
             _MetricData(
               Icons.inventory_outlined,
               'Pending',
-              '${widget.orders.where((o) => _workflowStatus(o) == 'Pending').length}',
+              '${widget.orders.where((o) => AdminOrderWorkflow.workflowStatus(o) == 'Pending').length}',
+            ),
+            _MetricData(
+              Icons.payments_outlined,
+              'Unpaid',
+              '${widget.orders.where((o) => AdminOrderWorkflow.paymentStatus(o) == 'Unpaid').length}',
             ),
             _MetricData(
               Icons.label_important_outline,
-              'Label printed',
-              '${widget.orders.where((o) => _workflowStatus(o) == 'Label printed').length}',
+              'Label created',
+              '${widget.orders.where((o) => AdminOrderWorkflow.workflowStatus(o) == 'Label created').length}',
             ),
             _MetricData(
               Icons.local_shipping_outlined,
-              'Sent',
-              '${widget.orders.where((o) => _workflowStatus(o) == 'Sent').length}',
+              'Shipped',
+              '${widget.orders.where((o) => AdminOrderWorkflow.workflowStatus(o) == 'Shipped').length}',
             ),
             _MetricData(
               Icons.check_box_outlined,
               'Selected',
-              '${_selectedOrderIds.length}',
+              '${_selectedOrderKeys.length}',
             ),
           ],
         ),
@@ -5701,8 +5803,27 @@ class _OrdersSectionState extends State<_OrdersSection> {
                         ),
                       ),
                     ),
+                    SizedBox(
+                      width: 220,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _paymentFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment status',
+                        ),
+                        items: [
+                          for (final option in _paymentFilters)
+                            DropdownMenuItem(
+                              value: option,
+                              child: Text(option),
+                            ),
+                        ],
+                        onChanged: (value) => setState(
+                          () => _paymentFilter = value ?? _paymentFilter,
+                        ),
+                      ),
+                    ),
                     FilledButton.icon(
-                      onPressed: _selectedOrderIds.isEmpty
+                      onPressed: _selectedOrderKeys.isEmpty
                           ? null
                           : () => _applyBatchAction(),
                       icon: const Icon(Icons.task_alt_outlined),
@@ -5755,22 +5876,40 @@ class _OrdersSectionState extends State<_OrdersSection> {
                   ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     leading: Checkbox(
-                      value: _selectedOrderIds.contains(order.id),
+                      value: _selectedOrderKeys.contains(
+                        _orderSelectionKey(order),
+                      ),
                       onChanged: (value) {
+                        final key = _orderSelectionKey(order);
                         setState(() {
                           if (value == true) {
-                            _selectedOrderIds.add(order.id);
+                            _selectedOrderKeys.add(key);
                           } else {
-                            _selectedOrderIds.remove(order.id);
+                            _selectedOrderKeys.remove(key);
                           }
                         });
                       },
                     ),
                     title: Text('${order.id} • ${order.customer}'),
                     subtitle: Text(
-                      '${_shippingType(order)} • ${order.shippingCarrier} ${order.shippingService} • ${_workflowStatus(order)}',
+                      '${AdminOrderWorkflow.paymentStatus(order)} • ${AdminOrderWorkflow.shippingType(order)} • ${order.shippingCarrier} ${order.shippingService} • ${AdminOrderWorkflow.workflowStatus(order)}',
                     ),
-                    trailing: Text(currency(order.total)),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(currency(order.total)),
+                        Text(
+                          AdminOrderWorkflow.paymentStatus(order),
+                          style: TextStyle(
+                            color: AdminOrderWorkflow.isPaid(order)
+                                ? const Color(0xFF27724E)
+                                : Theme.of(context).colorScheme.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                     children: [
                       ListTile(
                         contentPadding: const EdgeInsets.only(
@@ -5835,10 +5974,17 @@ class _OrdersSectionState extends State<_OrdersSection> {
 }
 
 class _InvoicesSection extends StatefulWidget {
-  const _InvoicesSection({required this.orders, required this.storeInfo});
+  const _InvoicesSection({
+    required this.orders,
+    required this.storeInfo,
+    required this.siteStatus,
+    required this.onUpdateOrder,
+  });
 
   final List<Order> orders;
   final StoreInfo storeInfo;
+  final SiteStatus siteStatus;
+  final AsyncValueChanged<Order> onUpdateOrder;
 
   @override
   State<_InvoicesSection> createState() => _InvoicesSectionState();
@@ -5846,14 +5992,12 @@ class _InvoicesSection extends StatefulWidget {
 
 class _InvoicesSectionState extends State<_InvoicesSection> {
   Order? _selected;
-  final _header = TextEditingController(text: 'Egbe Anom');
   final _footer = TextEditingController(
-    text: 'Thank you for shopping with Egbe Anom.',
+    text: 'Thank you for choosing EgbeAnom.',
   );
 
   @override
   void dispose() {
-    _header.dispose();
     _footer.dispose();
     super.dispose();
   }
@@ -5881,14 +6025,6 @@ class _InvoicesSectionState extends State<_InvoicesSection> {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _header,
-                        decoration: const InputDecoration(
-                          labelText: 'Invoice header',
-                        ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                      const SizedBox(height: 10),
                       TextField(
                         controller: _footer,
                         decoration: const InputDecoration(
@@ -5935,13 +6071,27 @@ class _InvoicesSectionState extends State<_InvoicesSection> {
                             _InvoiceDocumentPreview(
                               order: selected,
                               storeInfo: widget.storeInfo,
+                              thankYouText: _footer.text,
+                              returnPolicyText: widget.siteStatus.returnPolicy,
                             ),
                             const SizedBox(height: 12),
                             FilledButton.icon(
-                              onPressed: () => printHtmlDocument(
-                                'Invoice ${selected.id}',
-                                _invoiceHtml(selected, widget.storeInfo),
-                              ),
+                              onPressed: () {
+                                selected
+                                  ..status = 'Invoice created'
+                                  ..fulfillmentStatus = 'Invoice created';
+                                widget.onUpdateOrder(selected);
+                                printHtmlDocument(
+                                  'Invoice ${selected.id}',
+                                  _invoiceHtml(
+                                    selected,
+                                    widget.storeInfo,
+                                    thankYouText: _footer.text,
+                                    returnPolicyText:
+                                        widget.siteStatus.returnPolicy,
+                                  ),
+                                );
+                              },
                               icon: const Icon(Icons.print_outlined),
                               label: const Text('Print invoice'),
                             ),
@@ -6110,16 +6260,22 @@ class _AnalyticsSection extends StatefulWidget {
     required this.dailyMetrics,
     required this.products,
     required this.orders,
+    required this.reviews,
+    required this.events,
     required this.activeCarts,
     required this.conversionRate,
+    required this.onOpenSection,
   });
 
   final List<ActiveUserSession> sessions;
   final List<DailyMetric> dailyMetrics;
   final List<Fragrance> products;
   final List<Order> orders;
+  final List<ReviewSummary> reviews;
+  final List<AnalyticsEvent> events;
   final List<ActiveCart> activeCarts;
   final double conversionRate;
+  final ValueChanged<AdminSection> onOpenSection;
 
   @override
   State<_AnalyticsSection> createState() => _AnalyticsSectionState();
@@ -6135,6 +6291,7 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
   Widget build(BuildContext context) {
     final salesOrders = _filterOrders(widget.orders, _salesRange);
     final trafficMetrics = _filterMetrics(widget.dailyMetrics, _trafficRange);
+    final trafficEvents = _filterEvents(widget.events, _trafficRange);
     final productOrders = _filterOrders(widget.orders, _productRange);
     final reportOrders = _filterOrders(widget.orders, _reportRange);
     final visits = trafficMetrics.fold(0, (sum, metric) => sum + metric.visits);
@@ -6150,25 +6307,133 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
         ? 0.0
         : revenue / salesOrders.length;
     final sourceCounts = <String, double>{};
-    for (final session in widget.sessions) {
-      sourceCounts.update(
-        session.source,
-        (value) => value + 1,
-        ifAbsent: () => 1,
-      );
+    final sourceRows = trafficEvents.isNotEmpty ? trafficEvents : null;
+    if (sourceRows == null) {
+      for (final session in widget.sessions) {
+        sourceCounts.update(
+          session.source,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    } else {
+      for (final event in sourceRows) {
+        sourceCounts.update(
+          event.source,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
     }
     final pageCounts = <String, double>{};
-    for (final session in widget.sessions) {
-      pageCounts.update(
-        session.currentPage,
-        (value) => value + 1,
-        ifAbsent: () => 1,
-      );
+    if (trafficEvents.isEmpty) {
+      for (final session in widget.sessions) {
+        pageCounts.update(
+          session.currentPage,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    } else {
+      for (final event in trafficEvents.where(
+        (event) => event.eventName == 'page_view',
+      )) {
+        pageCounts.update(event.page, (value) => value + 1, ifAbsent: () => 1);
+      }
     }
+    final deviceCounts = <String, double>{};
+    final referrerCounts = <String, double>{};
+    if (trafficEvents.isEmpty) {
+      for (final session in widget.sessions) {
+        deviceCounts.update(
+          session.device,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+        final referrer = session.referrer.trim().isEmpty
+            ? 'Direct'
+            : session.referrer;
+        referrerCounts.update(
+          referrer,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    } else {
+      for (final event in trafficEvents) {
+        deviceCounts.update(
+          event.device,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+        final referrer = event.referrer.trim().isEmpty
+            ? 'Direct'
+            : event.referrer;
+        referrerCounts.update(
+          referrer,
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+    var totalActiveMinutes = 0;
+    var engagedSessions = 0;
+    for (final session in widget.sessions) {
+      totalActiveMinutes += session.minutesActive;
+      if (session.minutesActive >= 1 || session.currentPage != 'shop') {
+        engagedSessions += 1;
+      }
+    }
+    final newUsers = trafficMetrics.fold(
+      0,
+      (sum, metric) => sum + metric.newUsers,
+    );
+    final pageViews = trafficEvents
+        .where((event) => event.eventName == 'page_view')
+        .length;
+    final views = pageViews > 0 ? pageViews : visits + widget.sessions.length;
+    final viewsPerVisit = visits == 0 ? 0.0 : views / visits;
+    final engagementRate = widget.sessions.isEmpty
+        ? 0.0
+        : engagedSessions / widget.sessions.length * 100;
+    final averageEngagement = widget.sessions.isEmpty
+        ? 0.0
+        : totalActiveMinutes / widget.sessions.length;
+    final eventCount = trafficEvents.isNotEmpty
+        ? trafficEvents.length
+        : visits +
+              salesOrders.length +
+              widget.activeCarts.fold(0, (sum, cart) => sum + cart.itemCount) +
+              widget.sessions.length;
+    final trafficByDay = trafficMetrics
+        .map((metric) => ChartPoint(metric.day, metric.visits.toDouble()))
+        .toList();
+    final newUsersByDay = trafficMetrics
+        .map((metric) => ChartPoint(metric.day, metric.newUsers.toDouble()))
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        DefaultTextStyle.merge(
+          style: const TextStyle(color: Colors.white),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Analytics',
+                style: Theme.of(
+                  context,
+                ).textTheme.headlineSmall?.copyWith(color: Colors.white),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'First-party analytics modeled after Google Analytics reports: realtime, acquisition, engagement, pages, ecommerce, devices, and conversions.',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
         _MetricGrid(
           metrics: [
             _MetricData(
@@ -6177,6 +6442,27 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
               '${widget.sessions.length}',
             ),
             _MetricData(Icons.ads_click_outlined, 'Visits', '$visits'),
+            _MetricData(Icons.person_add_alt, 'New users', '$newUsers'),
+            _MetricData(
+              Icons.web_stories_outlined,
+              trafficEvents.isEmpty ? 'Views estimate' : 'Views',
+              '$views',
+            ),
+            _MetricData(
+              Icons.repeat_outlined,
+              'Views / visit',
+              viewsPerVisit.toStringAsFixed(2),
+            ),
+            _MetricData(
+              Icons.timer_outlined,
+              'Avg engagement',
+              '${averageEngagement.toStringAsFixed(1)} min',
+            ),
+            _MetricData(
+              Icons.touch_app_outlined,
+              trafficEvents.isEmpty ? 'Event estimate' : 'Events',
+              '$eventCount',
+            ),
             _MetricData(
               Icons.percent_outlined,
               'Conversion',
@@ -6198,6 +6484,62 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
               '${salesOrders.length}',
             ),
           ],
+        ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth > 980;
+            return Flex(
+              direction: wide ? Axis.horizontal : Axis.vertical,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: wide ? 6 : 0,
+                  child: _ChartCard(
+                    title: 'Traffic over time',
+                    subtitle: 'GA-style users/sessions trend',
+                    onTap: () {},
+                    trailing: _RangeSelector(
+                      value: _trafficRange,
+                      onChanged: (value) =>
+                          setState(() => _trafficRange = value),
+                    ),
+                    child: _MiniBarChart(points: trafficByDay),
+                  ),
+                ),
+                if (wide)
+                  const SizedBox(width: 16)
+                else
+                  const SizedBox(height: 16),
+                Expanded(
+                  flex: wide ? 6 : 0,
+                  child: _ChartCard(
+                    title: 'New users',
+                    subtitle: 'New customer/user acquisition trend',
+                    onTap: () {},
+                    trailing: _RangeSelector(
+                      value: _trafficRange,
+                      onChanged: (value) =>
+                          setState(() => _trafficRange = value),
+                    ),
+                    child: _MiniBarChart(
+                      points: newUsersByDay,
+                      color: const Color(0xFF27724E),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        _GoogleAnalyticsReportGrid(
+          sourceCounts: sourceCounts,
+          pageCounts: pageCounts,
+          deviceCounts: deviceCounts,
+          referrerCounts: referrerCounts,
+          engagementRate: engagementRate,
+          viewsPerVisit: viewsPerVisit,
         ),
         const SizedBox(height: 16),
         _AnalyticsInsightGrid(
@@ -6361,6 +6703,23 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
           range: _productRange,
           onRangeChanged: (value) => setState(() => _productRange = value),
         ),
+        const SizedBox(height: 16),
+        _DashboardChartGrid(
+          products: widget.products,
+          dailyMetrics: trafficMetrics,
+          activeCarts: widget.activeCarts,
+          onOpenSection: widget.onOpenSection,
+        ),
+        const SizedBox(height: 16),
+        _CommerceDashboardPanels(
+          products: widget.products,
+          metrics: trafficMetrics,
+          activeCarts: widget.activeCarts,
+          sessions: widget.sessions,
+          orders: widget.orders,
+          reviews: widget.reviews,
+          onOpenSection: widget.onOpenSection,
+        ),
       ],
     );
   }
@@ -6380,6 +6739,15 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
       final parsed = DateTime.tryParse(metric.day);
       return parsed == null || parsed.isAfter(cutoff);
     }).toList();
+  }
+
+  List<AnalyticsEvent> _filterEvents(
+    List<AnalyticsEvent> events,
+    String range,
+  ) {
+    final cutoff = _cutoff(range);
+    if (cutoff == null) return List.of(events);
+    return events.where((event) => event.occurredAt.isAfter(cutoff)).toList();
   }
 
   DateTime? _cutoff(String range) {
@@ -6475,6 +6843,142 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
       buckets[key] = (buckets[key] ?? 0) + order.total;
     }
     return buckets;
+  }
+}
+
+class _GoogleAnalyticsReportGrid extends StatelessWidget {
+  const _GoogleAnalyticsReportGrid({
+    required this.sourceCounts,
+    required this.pageCounts,
+    required this.deviceCounts,
+    required this.referrerCounts,
+    required this.engagementRate,
+    required this.viewsPerVisit,
+  });
+
+  final Map<String, double> sourceCounts;
+  final Map<String, double> pageCounts;
+  final Map<String, double> deviceCounts;
+  final Map<String, double> referrerCounts;
+  final double engagementRate;
+  final double viewsPerVisit;
+
+  @override
+  Widget build(BuildContext context) {
+    final sourcePoints = _rankedPoints(sourceCounts);
+    final pagePoints = _rankedPoints(pageCounts);
+    final devicePoints = _rankedPoints(deviceCounts);
+    final referrerRows = _rankedPoints(referrerCounts)
+        .take(6)
+        .map((point) => '${point.label} • ${point.value.toStringAsFixed(0)}')
+        .toList();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth > 980;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Flex(
+              direction: wide ? Axis.horizontal : Axis.vertical,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: wide ? 6 : 0,
+                  child: _ChartCard(
+                    title: 'Traffic acquisition',
+                    subtitle: 'Session source mix like GA acquisition',
+                    onTap: () {},
+                    child: _MiniBarChart(
+                      points: sourcePoints,
+                      color: const Color(0xFF27724E),
+                    ),
+                  ),
+                ),
+                if (wide)
+                  const SizedBox(width: 16)
+                else
+                  const SizedBox(height: 16),
+                Expanded(
+                  flex: wide ? 6 : 0,
+                  child: _ChartCard(
+                    title: 'Pages and screens',
+                    subtitle: 'Tracked page view distribution',
+                    onTap: () {},
+                    child: _MiniBarChart(
+                      points: pagePoints,
+                      color: const Color(0xFF5A6FA8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Flex(
+              direction: wide ? Axis.horizontal : Axis.vertical,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: wide ? 4 : 0,
+                  child: _ChartCard(
+                    title: 'Tech details',
+                    subtitle: 'Device categories from live sessions',
+                    onTap: () {},
+                    child: _MiniBarChart(
+                      points: devicePoints,
+                      color: const Color(0xFFC88F52),
+                    ),
+                  ),
+                ),
+                if (wide)
+                  const SizedBox(width: 16)
+                else
+                  const SizedBox(height: 16),
+                Expanded(
+                  flex: wide ? 4 : 0,
+                  child: _MiniTableCard(
+                    title: 'Top referrers',
+                    action: 'Analytics',
+                    rows: referrerRows,
+                    onTap: () {},
+                  ),
+                ),
+                if (wide)
+                  const SizedBox(width: 16)
+                else
+                  const SizedBox(height: 16),
+                Expanded(
+                  flex: wide ? 4 : 0,
+                  child: _MiniTableCard(
+                    title: 'Engagement summary',
+                    action: 'Analytics',
+                    rows: [
+                      'Engagement rate estimate: ${engagementRate.toStringAsFixed(1)}%',
+                      'Views per visit: ${viewsPerVisit.toStringAsFixed(2)}',
+                      'Tracked events feed ecommerce and page reports.',
+                    ],
+                    onTap: () {},
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  List<ChartPoint> _rankedPoints(Map<String, double> values) {
+    final rows =
+        values.entries
+            .map(
+              (entry) => ChartPoint(
+                entry.key.trim().isEmpty ? 'Unknown' : entry.key.trim(),
+                entry.value,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+    return rows.take(8).toList();
   }
 }
 
@@ -6726,7 +7230,9 @@ class _EmailSectionState extends State<_EmailSection> {
   late final TextEditingController _smtpHost;
   late final TextEditingController _smtpPort;
   late final TextEditingController _username;
+  late final TextEditingController _password;
   String _audience = 'All customers';
+  late String _provider;
   late bool _useSsl;
   bool _htmlMode = true;
   final List<EmailTemplate> _templates = [
@@ -6770,6 +7276,8 @@ class _EmailSectionState extends State<_EmailSection> {
     _smtpHost = TextEditingController(text: widget.settings.smtpHost);
     _smtpPort = TextEditingController(text: '${widget.settings.smtpPort}');
     _username = TextEditingController(text: widget.settings.username);
+    _password = TextEditingController(text: widget.settings.password);
+    _provider = _normalizeEmailProvider(widget.settings.provider);
     _useSsl = widget.settings.useSsl;
   }
 
@@ -6784,6 +7292,7 @@ class _EmailSectionState extends State<_EmailSection> {
     _smtpHost.dispose();
     _smtpPort.dispose();
     _username.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -6815,6 +7324,35 @@ class _EmailSectionState extends State<_EmailSection> {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _provider,
+                        decoration: const InputDecoration(
+                          labelText: 'SMTP provider',
+                          prefixIcon: Icon(Icons.alternate_email),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'google',
+                            child: Text('Google / Gmail'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'godaddy',
+                            child: Text('GoDaddy'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'generic',
+                            child: Text('Generic SMTP'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          final provider = _normalizeEmailProvider(value);
+                          setState(() {
+                            _provider = provider;
+                            _applyEmailProviderPreset(provider);
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
                       Row(
                         children: [
                           Expanded(
@@ -6892,9 +7430,20 @@ class _EmailSectionState extends State<_EmailSection> {
                           labelText: 'Mailbox username',
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _password,
+                        decoration: const InputDecoration(
+                          labelText: 'SMTP password or app password',
+                        ),
+                        obscureText: true,
+                      ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Use SSL/TLS'),
+                        title: const Text('Use direct SSL'),
+                        subtitle: const Text(
+                          'Turn on for port 465. Leave off for port 587 STARTTLS.',
+                        ),
                         value: _useSsl,
                         onChanged: (value) => setState(() => _useSsl = value),
                       ),
@@ -6902,6 +7451,7 @@ class _EmailSectionState extends State<_EmailSection> {
                       FilledButton.icon(
                         onPressed: () => widget.onSaveSettings(
                           EmailServerSettings(
+                            provider: _provider,
                             fromName: _fromName.text.trim(),
                             fromEmail: _fromEmail.text.trim(),
                             imapHost: _imapHost.text.trim(),
@@ -6909,6 +7459,7 @@ class _EmailSectionState extends State<_EmailSection> {
                             smtpHost: _smtpHost.text.trim(),
                             smtpPort: int.tryParse(_smtpPort.text) ?? 587,
                             username: _username.text.trim(),
+                            password: _password.text,
                             useSsl: _useSsl,
                           ),
                         ),
@@ -7033,6 +7584,41 @@ class _EmailSectionState extends State<_EmailSection> {
         );
       },
     );
+  }
+
+  String _normalizeEmailProvider(String? value) {
+    return switch ((value ?? '').trim().toLowerCase()) {
+      'google' || 'gmail' => 'google',
+      'godaddy' || 'go daddy' => 'godaddy',
+      _ => 'generic',
+    };
+  }
+
+  void _applyEmailProviderPreset(String provider) {
+    switch (provider) {
+      case 'google':
+        _imapHost.text = 'imap.gmail.com';
+        _imapPort.text = '993';
+        _smtpHost.text = 'smtp.gmail.com';
+        _smtpPort.text = '587';
+        _useSsl = false;
+        if (_username.text.trim().isEmpty) {
+          _username.text = _fromEmail.text.trim();
+        }
+        break;
+      case 'godaddy':
+        _imapHost.text = 'imap.secureserver.net';
+        _imapPort.text = '993';
+        _smtpHost.text = 'smtpout.secureserver.net';
+        _smtpPort.text = '587';
+        _useSsl = false;
+        if (_username.text.trim().isEmpty) {
+          _username.text = _fromEmail.text.trim();
+        }
+        break;
+      default:
+        break;
+    }
   }
 }
 
@@ -8749,6 +9335,8 @@ class _ReportsSection extends StatelessWidget {
             'buy_quantity': coupon.buyQuantity,
             'get_quantity': coupon.getQuantity,
             'get_price': coupon.getPrice,
+            'remaining_balance': coupon.remainingBalance,
+            'recipient_email': coupon.recipientEmail,
             'starts': coupon.starts,
             'ends': coupon.ends,
             'is_active': coupon.isActive,
@@ -8938,16 +9526,19 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
                   Icons.sell_outlined,
                   'Product sales',
                   currency(productRevenue),
+                  onTap: () => _showProductSalesBreakdown(context, orders),
                 ),
                 _MetricData(
                   Icons.request_quote_outlined,
                   'Tax collected',
                   currency(tax),
+                  onTap: () => _showTaxBreakdown(context, orders),
                 ),
                 _MetricData(
                   Icons.local_shipping_outlined,
                   'Shipping collected',
                   currency(shipping),
+                  onTap: () => _showShippingBreakdown(context, orders),
                 ),
                 _MetricData(
                   Icons.inventory_2_outlined,
@@ -8985,6 +9576,234 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
     return widget.orders
         .where((order) => (order.createdAt ?? DateTime(1970)).isAfter(cutoff))
         .toList();
+  }
+
+  void _showTaxBreakdown(BuildContext context, List<Order> orders) {
+    final rows = _taxBreakdownRows(orders);
+    final total = rows.fold<double>(
+      0,
+      (sum, row) => sum + (row['amount'] as double),
+    );
+    _showReportBreakdownDialog(
+      context: context,
+      title: 'Tax collected breakdown',
+      subtitle: '${orders.length} order(s) • ${currency(total)} collected',
+      columns: const ['Tax type', 'Jurisdiction', 'Rate', 'Amount'],
+      rows: [
+        for (final row in rows)
+          [
+            row['name'] as String,
+            row['jurisdiction'] as String,
+            row['rate'] as String,
+            currency(row['amount'] as double),
+          ],
+      ],
+      emptyMessage: 'No tax was collected for the selected period.',
+    );
+  }
+
+  void _showProductSalesBreakdown(BuildContext context, List<Order> orders) {
+    final rows = _productSalesRows(orders);
+    final total = rows.fold<double>(
+      0,
+      (sum, row) => sum + (row['revenue'] as double),
+    );
+    _showReportBreakdownDialog(
+      context: context,
+      title: 'Product sales breakdown',
+      subtitle: '${orders.length} order(s) • ${currency(total)} product sales',
+      columns: const ['Product', 'SKU', 'Qty', 'Sales'],
+      rows: [
+        for (final row in rows)
+          [
+            row['name'] as String,
+            row['sku'] as String,
+            '${row['quantity']}',
+            currency(row['revenue'] as double),
+          ],
+      ],
+      emptyMessage: 'No products were sold in the selected period.',
+    );
+  }
+
+  void _showShippingBreakdown(BuildContext context, List<Order> orders) {
+    final rows = _shippingBreakdownRows(orders);
+    final total = rows.fold<double>(
+      0,
+      (sum, row) => sum + (row['amount'] as double),
+    );
+    _showReportBreakdownDialog(
+      context: context,
+      title: 'Shipping collected breakdown',
+      subtitle: '${orders.length} order(s) • ${currency(total)} collected',
+      columns: const ['Carrier', 'Service', 'Orders', 'Collected'],
+      rows: [
+        for (final row in rows)
+          [
+            row['carrier'] as String,
+            row['service'] as String,
+            '${row['orders']}',
+            currency(row['amount'] as double),
+          ],
+      ],
+      emptyMessage: 'No shipping was collected for the selected period.',
+    );
+  }
+
+  List<Map<String, Object>> _taxBreakdownRows(List<Order> orders) {
+    final map = <String, Map<String, Object>>{};
+    for (final order in orders) {
+      for (final line in order.taxBreakdown) {
+        if (line.amount <= 0) {
+          continue;
+        }
+        final name = line.name.trim().isEmpty ? 'Tax' : line.name.trim();
+        final jurisdiction = line.jurisdiction.trim().isEmpty
+            ? 'Unspecified'
+            : line.jurisdiction.trim();
+        final key = '$name|$jurisdiction|${line.rate.toStringAsFixed(5)}';
+        final existing = map[key];
+        if (existing == null) {
+          map[key] = {
+            'name': name,
+            'jurisdiction': jurisdiction,
+            'rateValue': line.rate,
+            'rate': '${(line.rate * 100).toStringAsFixed(3)}%',
+            'amount': line.amount,
+          };
+        } else {
+          existing['amount'] = (existing['amount'] as double) + line.amount;
+        }
+      }
+    }
+    final rows = map.values.toList()
+      ..sort(
+        (a, b) => (b['amount'] as double).compareTo(a['amount'] as double),
+      );
+    return rows;
+  }
+
+  List<Map<String, Object>> _productSalesRows(List<Order> orders) {
+    final map = <String, Map<String, Object>>{};
+    for (final order in orders) {
+      for (final line in order.lines) {
+        final sku = line.sku.trim().isEmpty ? 'No SKU' : line.sku.trim();
+        final name = line.product.name.trim().isEmpty
+            ? 'Product'
+            : line.product.name.trim();
+        final key = '${line.product.id}|$sku|$name';
+        final existing = map[key];
+        if (existing == null) {
+          map[key] = {
+            'name': name,
+            'sku': sku,
+            'quantity': line.quantity,
+            'revenue': line.total,
+          };
+        } else {
+          existing['quantity'] = (existing['quantity'] as int) + line.quantity;
+          existing['revenue'] = (existing['revenue'] as double) + line.total;
+        }
+      }
+    }
+    final rows = map.values.toList()
+      ..sort(
+        (a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double),
+      );
+    return rows;
+  }
+
+  List<Map<String, Object>> _shippingBreakdownRows(List<Order> orders) {
+    final map = <String, Map<String, Object>>{};
+    for (final order in orders) {
+      if (order.shippingTotal <= 0) {
+        continue;
+      }
+      final carrier = order.shippingCarrier.trim().isEmpty
+          ? 'Unspecified'
+          : order.shippingCarrier.trim();
+      final serviceParts = [
+        order.shippingService.trim(),
+        order.shippingPriority.trim(),
+      ].where((part) => part.isNotEmpty).toList();
+      final service = serviceParts.isEmpty
+          ? 'Unspecified'
+          : serviceParts.join(' • ');
+      final key = '$carrier|$service';
+      final existing = map[key];
+      if (existing == null) {
+        map[key] = {
+          'carrier': carrier,
+          'service': service,
+          'orders': 1,
+          'amount': order.shippingTotal,
+        };
+      } else {
+        existing['orders'] = (existing['orders'] as int) + 1;
+        existing['amount'] =
+            (existing['amount'] as double) + order.shippingTotal;
+      }
+    }
+    final rows = map.values.toList()
+      ..sort(
+        (a, b) => (b['amount'] as double).compareTo(a['amount'] as double),
+      );
+    return rows;
+  }
+
+  void _showReportBreakdownDialog({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required List<String> columns,
+    required List<List<String>> rows,
+    required String emptyMessage,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 760,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(subtitle),
+                const SizedBox(height: 12),
+                if (rows.isEmpty)
+                  Text(emptyMessage)
+                else
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: [
+                        for (final column in columns)
+                          DataColumn(label: Text(column)),
+                      ],
+                      rows: [
+                        for (final row in rows)
+                          DataRow(
+                            cells: [
+                              for (final value in row) DataCell(Text(value)),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   DateTime? _cutoff() {
@@ -9702,10 +10521,9 @@ class _DatabaseDownloadPanelState extends State<_DatabaseDownloadPanel> {
 }
 
 class _DailyTrendPanel extends StatelessWidget {
-  const _DailyTrendPanel({required this.metrics, this.onTap});
+  const _DailyTrendPanel({required this.metrics});
 
   final List<DailyMetric> metrics;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -9713,52 +10531,50 @@ class _DailyTrendPanel extends StatelessWidget {
       return metric.revenue > max ? metric.revenue : max;
     });
 
-    final content = Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Daily marketplace performance',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 14),
-          for (final metric in metrics)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  SizedBox(width: 42, child: Text(metric.day)),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
-                      child: LinearProgressIndicator(
-                        minHeight: 12,
-                        value: maxRevenue == 0
-                            ? 0
-                            : metric.revenue / maxRevenue,
-                        backgroundColor: const Color(0xFFE8E1D6),
-                        color: const Color(0xFFC88F52),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Daily marketplace performance',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 14),
+            for (final metric in metrics)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    SizedBox(width: 42, child: Text(metric.day)),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(5),
+                        child: LinearProgressIndicator(
+                          minHeight: 12,
+                          value: maxRevenue == 0
+                              ? 0
+                              : metric.revenue / maxRevenue,
+                          backgroundColor: const Color(0xFFE8E1D6),
+                          color: const Color(0xFFC88F52),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 190,
-                    child: Text(
-                      '${currency(metric.revenue)} • ${metric.newUsers} new • ${metric.orders} orders',
-                      textAlign: TextAlign.right,
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 190,
+                      child: Text(
+                        '${currency(metric.revenue)} • ${metric.newUsers} new • ${metric.orders} orders',
+                        textAlign: TextAlign.right,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
-    );
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
@@ -11237,7 +12053,14 @@ class _OrderFulfillmentEditor extends StatefulWidget {
 
 class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
   late TextEditingController _tracking;
+  late TextEditingController _refundAmount;
+  late TextEditingController _refundReference;
+  late TextEditingController _refundReason;
+  late TextEditingController _returnReason;
   late String _status;
+  late String _financialStatus;
+  late String _returnStatus;
+  late bool _returnRestocked;
   late String _carrier;
   late String _service;
   late String _labelStatus;
@@ -11247,6 +12070,7 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
   void initState() {
     super.initState();
     _status = _normalizedStatus(widget.order.fulfillmentStatus);
+    _financialStatus = _normalizedFinancialStatus(widget.order.financialStatus);
     _carrier = widget.order.shippingCarrier.isEmpty
         ? 'USPS'
         : widget.order.shippingCarrier;
@@ -11255,6 +12079,20 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
         : widget.order.shippingService;
     _labelStatus = widget.order.labelStatus;
     _tracking = TextEditingController(text: widget.order.trackingNumber);
+    _refundAmount = TextEditingController(
+      text: widget.order.refundTotal > 0
+          ? widget.order.refundTotal.toStringAsFixed(2)
+          : '',
+    );
+    _refundReference = TextEditingController(
+      text: widget.order.refundReference,
+    );
+    _refundReason = TextEditingController(text: widget.order.refundReason);
+    _returnStatus = widget.order.returnStatus.trim().isEmpty
+        ? 'No return'
+        : widget.order.returnStatus;
+    _returnRestocked = widget.order.returnRestocked;
+    _returnReason = TextEditingController(text: widget.order.returnReason);
   }
 
   String _normalizedStatus(String value) {
@@ -11263,10 +12101,15 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
       return 'Delivered';
     }
     if (status == 'sent' || status == 'shipped') {
-      return 'Sent';
+      return 'Shipped';
     }
-    if (status == 'label printed' || status == 'label created') {
-      return 'Label printed';
+    if (status == 'label printed' ||
+        status == 'label created' ||
+        status == 'label_created') {
+      return 'Label created';
+    }
+    if (status == 'invoice created' || status == 'invoice_created') {
+      return 'Invoice created';
     }
     if (status == 'processing' ||
         status == 'being picked' ||
@@ -11279,14 +12122,39 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
     return 'Pending';
   }
 
+  String _normalizedFinancialStatus(String value) {
+    final status = value.toLowerCase().replaceAll('_', ' ');
+    if (status == 'paid') {
+      return 'Paid';
+    }
+    if (status == 'partially refunded') {
+      return 'Partially refunded';
+    }
+    if (status == 'refunded') {
+      return 'Refunded';
+    }
+    return 'Unpaid';
+  }
+
   @override
   void dispose() {
     _tracking.dispose();
+    _refundAmount.dispose();
+    _refundReference.dispose();
+    _refundReason.dispose();
+    _returnReason.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final paid =
+        widget.order.financialStatus.trim().toLowerCase() == 'paid' ||
+        widget.order.status.trim().toLowerCase() == 'paid';
+    final lockedForFulfillment =
+        widget.order.status.trim().toLowerCase() == 'cancelled' ||
+        widget.order.status.trim().toLowerCase() == 'refunded' ||
+        _financialStatus == 'Refunded';
     return Column(
       children: [
         Row(
@@ -11302,10 +12170,15 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                     child: Text('Processing'),
                   ),
                   DropdownMenuItem(
-                    value: 'Label printed',
-                    child: Text('Label printed'),
+                    value: 'Invoice created',
+                    child: Text('Invoice created'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Label created',
+                    child: Text('Label created'),
                   ),
                   DropdownMenuItem(value: 'Sent', child: Text('Sent')),
+                  DropdownMenuItem(value: 'Shipped', child: Text('Shipped')),
                   DropdownMenuItem(
                     value: 'Delivered',
                     child: Text('Delivered'),
@@ -11335,6 +12208,119 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _financialStatus,
+                decoration: const InputDecoration(labelText: 'Payment status'),
+                items: const [
+                  DropdownMenuItem(value: 'Unpaid', child: Text('Unpaid')),
+                  DropdownMenuItem(value: 'Paid', child: Text('Paid')),
+                  DropdownMenuItem(
+                    value: 'Partially refunded',
+                    child: Text('Partially refunded'),
+                  ),
+                  DropdownMenuItem(value: 'Refunded', child: Text('Refunded')),
+                ],
+                onChanged: (value) => setState(
+                  () => _financialStatus = value ?? _financialStatus,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _refundAmount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(labelText: 'Refund amount'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _refundReference,
+                decoration: const InputDecoration(
+                  labelText: 'Refund reference',
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _refundReason,
+                decoration: const InputDecoration(labelText: 'Refund reason'),
+              ),
+            ),
+          ],
+        ),
+        if (_financialStatus == 'Refunded') ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Full refunds automatically return the order items to inventory once.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _returnStatus,
+                decoration: const InputDecoration(labelText: 'Return / RMA'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'No return',
+                    child: Text('No return'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Return requested',
+                    child: Text('Return requested'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Return approved',
+                    child: Text('Return approved'),
+                  ),
+                  DropdownMenuItem(value: 'Returned', child: Text('Returned')),
+                  DropdownMenuItem(
+                    value: 'Return rejected',
+                    child: Text('Return rejected'),
+                  ),
+                ],
+                onChanged: (value) =>
+                    setState(() => _returnStatus = value ?? _returnStatus),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _returnRestocked,
+                title: const Text('Restock returned items'),
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: _returnStatus == 'No return'
+                    ? null
+                    : (value) =>
+                          setState(() => _returnRestocked = value ?? false),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _returnReason,
+          decoration: const InputDecoration(labelText: 'Return notes'),
         ),
         const SizedBox(height: 10),
         Row(
@@ -11376,15 +12362,13 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
               child: OutlinedButton.icon(
                 onPressed: _creatingLabel
                     ? null
+                    : lockedForFulfillment
+                    ? null
+                    : !paid
+                    ? null
                     : () async {
                         final messenger = ScaffoldMessenger.of(context);
-                        if (_carrier != 'USPS') {
-                          setState(() {
-                            _labelStatus = 'Label printed';
-                            _status = 'Label printed';
-                          });
-                          return;
-                        }
+                        widget.order.shippingCarrier = _carrier;
                         setState(() => _creatingLabel = true);
                         try {
                           final label = await widget.onCreateShippingLabel(
@@ -11395,8 +12379,8 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                           }
                           setState(() {
                             _tracking.text = label.trackingNumber;
-                            _labelStatus = 'Label printed';
-                            _status = 'Label printed';
+                            _labelStatus = 'Label created';
+                            _status = 'Label created';
                             _service = widget.order.shippingService.isEmpty
                                 ? _service
                                 : widget.order.shippingService;
@@ -11404,7 +12388,9 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                           messenger.showSnackBar(
                             SnackBar(
                               content: Text(
-                                'USPS label created for ${label.trackingNumber}.',
+                                label.trackingNumber.trim().isNotEmpty
+                                    ? '${_carrier.toUpperCase()} label created for ${label.trackingNumber}.'
+                                    : '${_carrier.toUpperCase()} address label created (no postage).',
                               ),
                             ),
                           );
@@ -11422,24 +12408,73 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                         }
                       },
                 icon: const Icon(Icons.local_shipping_outlined),
-                label: Text(_creatingLabel ? 'Creating label' : 'Create label'),
+                label: Text(
+                  !paid
+                      ? 'Payment required'
+                      : lockedForFulfillment
+                      ? 'Fulfillment locked'
+                      : _creatingLabel
+                      ? 'Creating label'
+                      : 'Create label',
+                ),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: FilledButton.icon(
                 onPressed: () {
+                  final refundTotal =
+                      double.tryParse(_refundAmount.text.trim()) ?? 0;
+                  final refundStatus = switch (_financialStatus) {
+                    'Refunded' => 'Refunded',
+                    'Partially refunded' => 'Partially refunded',
+                    _ => 'Not refunded',
+                  };
                   widget.order
-                    ..status = _status == 'Pending'
+                    ..financialStatus = _financialStatus
+                    ..refundStatus = refundStatus
+                    ..refundTotal = refundStatus == 'Not refunded'
+                        ? 0
+                        : refundTotal
+                    ..refundReference = refundStatus == 'Not refunded'
+                        ? ''
+                        : _refundReference.text.trim()
+                    ..refundReason = refundStatus == 'Not refunded'
+                        ? ''
+                        : _refundReason.text.trim()
+                    ..refundedAt = refundStatus == 'Not refunded'
+                        ? null
+                        : widget.order.refundedAt ?? DateTime.now()
+                    ..returnStatus = _returnStatus
+                    ..returnReason = _returnStatus == 'No return'
+                        ? ''
+                        : _returnReason.text.trim()
+                    ..returnRestocked = _returnStatus == 'No return'
+                        ? false
+                        : _returnRestocked
+                    ..returnedAt = _returnStatus == 'No return'
+                        ? null
+                        : widget.order.returnedAt ?? DateTime.now()
+                    ..status = _financialStatus == 'Refunded'
+                        ? 'Refunded'
+                        : _status == 'Cancelled'
+                        ? 'Cancelled'
+                        : _status == 'Pending'
                         ? 'Paid'
                         : _status == 'Sent'
                         ? 'Shipped'
                         : _status
-                    ..fulfillmentStatus = _status
+                    ..fulfillmentStatus = _status == 'Cancelled'
+                        ? 'Cancelled'
+                        : _financialStatus == 'Refunded'
+                        ? 'Cancelled'
+                        : _status
                     ..shippingCarrier = _carrier
                     ..shippingService = _service
                     ..trackingNumber = _tracking.text.trim()
-                    ..labelStatus = _labelStatus;
+                    ..labelStatus = _status == 'Label created'
+                        ? 'Label created'
+                        : _labelStatus;
                   widget.onSave(widget.order);
                 },
                 icon: const Icon(Icons.save_outlined),

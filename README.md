@@ -1,117 +1,47 @@
-# EgbeAnom Store Notes
+# EgbeAnom Handoff Docs
 
-## Local Debug
+This folder is the handoff pack for the EgbeAnom store.
 
-Run from `egbeanom/`:
+It is written for a store owner, not a programmer.
 
-```sh
-flutter run -d chrome \
-  --dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY="[anon JWT from .vscode/launch.json]" \
-  --dart-define=SUPABASE_PRODUCT_BUCKET=product-images
-```
+Start here:
 
-VS Code launch configs are already set up in:
+1. `OWNER_QUICK_START.md`
+2. `Docs/Admin Guide/README.md`
+3. `ROUTINE_CHECKLIST.md`
+4. `CURRENT_STATUS.md`
+5. `PRODUCTION_HANDOFF_CHECKLIST.md`
 
-- `.vscode/launch.json`
-- `egbeanom/.vscode/launch.json`
+## What Works Now
 
-Use a full debug restart after changing auth, Supabase config, or route logic.
+The store can manage products, categories, inventory, taxes, shipping, promotions, orders, invoices, pack lists, labels, reviews, reports, and admin users.
 
-## Supabase
+Stripe sandbox checkout has been tested through the main happy path:
 
-Supabase is the database, auth provider, and product image bucket.
+- the customer adds items to cart
+- the order is saved as pending and unpaid
+- Stripe payment succeeds
+- the order changes to paid
+- the success page shows order details
+- the survey appears
+- the order can be processed in admin
 
-Apply schema updates from:
+Email sending is wired through SMTP. Before launch, enter the real mailbox settings and send a real test email.
 
-```sh
-supabase/schema.sql
-```
+## Before Public Launch
 
-Seed/reference product data lives in:
+Do these final checks:
 
-```sh
-supabase/seed.sql
-```
+- enter the final store address
+- enter final tax rules
+- enter final shipping choices and carrier credentials
+- enter real SMTP email settings and confirm a test email arrives
+- enter live Stripe keys and run one small live payment
+- check one invoice, one pack list, and one label printout
+- make sure unpaid orders are not shipped
 
-Product images go into the public bucket:
+## Browser Book
 
-```txt
-product-images
-```
+There is also an easy browser version of the admin guide:
 
-## Admin Login
-
-Current admin login:
-
-```txt
-calvin.fowler74@gmail.com
-Vache1
-```
-
-Supabase rejected `Vache` because the project enforces a 6-character minimum password.
-
-## Product Image/Repair Scripts
-
-Run these from the repo root with a real Supabase service-role key in the environment.
-
-```sh
-SUPABASE_URL="https://devtecknxpgdhbkdjnvt.supabase.co" \
-SUPABASE_SERVICE_ROLE_KEY="[service role key]" \
-SUPABASE_PRODUCT_BUCKET="product-images" \
-node scripts/upload-supabase-product-images.js
-```
-
-This repairs/imports The Pineapple Man and African Keke.
-
-```sh
-SUPABASE_URL="https://devtecknxpgdhbkdjnvt.supabase.co" \
-SUPABASE_SERVICE_ROLE_KEY="[service role key]" \
-SUPABASE_PRODUCT_BUCKET="product-images" \
-node scripts/add-2026-06-18-products.js
-```
-
-This imports Sauvageur and Not Tonight Bae.
-
-## Build
-
-Run from the repo root:
-
-```sh
-npm run build-web
-```
-
-That command compiles the live Supabase URL, anon key, and `product-images` bucket into the Flutter web bundle. If you build manually, run from `egbeanom/`:
-
-```sh
-flutter build web \
-  --dart-define=SUPABASE_URL=https://devtecknxpgdhbkdjnvt.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRldnRlY2tueHBnZGhia2RqbnZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NTkzNjgsImV4cCI6MjA5NzIzNTM2OH0.yyBLbTrdXtanXmI_AB2BcbBoKAGDuWcod5C5DFvudoE" \
-  --dart-define=SUPABASE_PRODUCT_BUCKET=product-images
-```
-
-Copy the contents of:
-
-```txt
-egbeanom/build/web/
-```
-
-to the web host public directory.
-
-## Current Storefront Behavior
-
-- Home page shows 4 products based on the admin-selected home shelf mode.
-- Admin can select Best sellers, Most favorited, Top rated, Newest, Price low, Price high, or Featured products.
-- Featured products are selected in Admin -> Site.
-- Explore Collection opens the full catalog page.
-- Home search opens the full catalog only when the search arrow is clicked.
-- Catalog page supports live search, filter, and sort.
-
-## Checks
-
-Run before handoff:
-
-```sh
-flutter analyze
-flutter test
-```
+[Open the browser book](./Docs/Admin%20Guide%20Book/index.html)

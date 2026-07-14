@@ -1,0 +1,16 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://devtecknxpgdhbkdjnvt.supabase.co https:; font-src 'self' data:; connect-src 'self' https://devtecknxpgdhbkdjnvt.supabase.co https://*.sentry.io https://sentry.io; frame-src 'self' https://checkout.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.stripe.com"), publickey-credentials-get=(self)
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+
+/flutter_service_worker.js
+  Cache-Control: no-cache
+
+/main.dart.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

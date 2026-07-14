@@ -1,51 +1,178 @@
-# Egbe Anom Supabase Setup
+# EgbeAnom Supabase Technical Notes
 
-This folder contains the Supabase setup for the store. Supabase Auth is the
-source of truth for customer/admin login. The `store_customers` and
-`backend_users` tables are profile/role tables only; they should not contain
-password hashes.
+This folder is for the technical helper who manages the live Supabase project.
 
-## Apply schema
+The owner handoff guide is in the root folder and in `Docs/Admin Guide`.
 
-Run `supabase/schema.sql` in the Supabase SQL editor. It creates the core product, image, note, customer, backend-user, blocked-IP, and site-settings tables, plus a public `product-images` storage bucket.
+## What Supabase Handles
 
-Then run `supabase/seed.sql` to load the current product catalog and fragrance notes.
+Supabase stores the live store data:
 
-## Auth model
+- products, variants, photos, and fragrance details
+- categories
+- coupons and promotions
+- store info
+- tax rules
+- shipping settings
+- orders and order items
+- customer profiles
+- reviews and post-purchase surveys
+- admin users and roles
+- analytics
+- site settings, including email and payment settings
 
-Create customer accounts through the storefront. The app calls Supabase Auth
-signup/login and then creates or reads the matching `store_customers` profile.
+Supabase Auth is the source of truth for login.
 
-For admin users, create the user in Supabase Auth first, then add a matching
-row in `backend_users` with that auth user's `id` in `auth_user_id`, plus the
-same email and role. Admin login uses Supabase Auth password verification and
-then checks the `backend_users` profile for authorization.
+The `store_customers` and `backend_users` tables are profile tables. They should not store password hashes.
 
-## Upload current product images
+## Schema
 
-Set:
+The main schema file is:
+
+`supabase/schema.sql`
+
+It includes the current tables, policies, and helper functions, including:
+
+- order and order item storage
+- review and survey storage
+- tax breakdown storage
+- product detail sections
+- inventory decrement after paid orders
+- row-level security policies
+
+Apply schema changes with the project’s normal schema apply script or through the Supabase SQL editor.
+
+## Edge Functions
+
+Current functions include:
+
+- `stripe-checkout-session` creates Stripe checkout sessions
+- `stripe-webhook` receives Stripe payment events and updates orders
+- `send-email` sends SMTP customer emails
+- `usps-shipping`, `ups-shipping`, `fedex-shipping`, and `dhl-shipping` handle carrier label/rate work
+- `credential-migration` supports credential migration/encryption work
+
+Deploy a function with:
 
 ```sh
-export SUPABASE_URL="https://devtecknxpgdhbkdjnvt.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="[copy the real service-role key from Supabase dashboard]"
-export SUPABASE_PRODUCT_BUCKET="product-images"
+supabase functions deploy FUNCTION_NAME --project-ref PROJECT_REF
+```
+
+Example:
+
+```sh
+supabase functions deploy send-email --project-ref devtecknxpgdhbkdjnvt
+```
+
+`send-email` is intentionally deployed with `--no-verify-jwt` when used for
+customer order events. This lets post-payment order emails be sent from the
+storefront return flow, but the function still performs its own checks:
+
+- manual emails require a backend admin user
+- order-event emails must match the order recipient
+- unsupported email kinds are rejected
+- rate limiting is enforced inside the function
+
+Use this command for email deployments:
+
+```sh
+supabase functions deploy send-email --project-ref PROJECT_REF --no-verify-jwt
+```
+
+Run the Edge Function smoke checks with:
+
+```sh
+npm run smoke-test-edge-functions
+```
+
+## Required Environment Values
+
+Use real values from the Supabase, Stripe, SMTP, and carrier dashboards.
+
+Do not commit secret values into this repository.
+
+Common values:
+
+- Supabase project URL
+- Supabase anon or publishable key for the Flutter app
+- Supabase service role key for trusted server scripts only
+- Stripe secret key
+- Stripe webhook signing secret
+- allowed storefront/admin origins for CORS
+- carrier API credentials
+
+SMTP settings are entered in the admin Email screen, then used by the `send-email` function.
+
+## Current Payment Flow
+
+The store creates an order before Stripe payment finishes.
+
+That order starts as:
+
+- order status: `Pending`
+- financial status: `unpaid`
+
+After Stripe confirms payment, the order changes to:
+
+- order status: `Pending`
+- financial status: `paid`
+
+Inventory is lowered after the order is paid. The inventory helper is idempotent, so the same paid order should not subtract stock twice.
+
+## Current Email Flow
+
+Email sending is wired through the `send-email` function.
+
+Customer emails are expected for:
+
+- successful paid order with invoice/order details
+- Processing status
+- Label created status
+- Sent or Shipped status
+
+Before launch, enter real SMTP settings in admin and confirm a test email arrives in a real inbox.
+
+## Current Tax Flow
+
+Tax rules are based on the store location in Store Info and the customer address at checkout.
+
+US location rules:
+
+- same city as store: charge city, county, and state tax
+- same county but different city: charge county and state tax
+- same state but different county: charge state tax
+- different state: no US state, county, or city tax
+
+International rules can use VAT, import, or other country-based tax rules.
+
+## Current Shipping Flow
+
+The app supports:
+
+- flat rate per order
+- flat rate per item
+- carrier options
+- generated carrier labels when credentials are ready
+- address-label fallback when carrier label creation is not available
+
+Before launch, test each live carrier account that will be used.
+
+## Product Images
+
+Product images are stored in the configured Supabase storage bucket.
+
+The upload helper is:
+
+```sh
 node scripts/upload-supabase-product-images.js
 ```
 
-The script uploads Pineapple Man and African Keke images, updates the matching
-`product_images` rows, and sets each product's primary photo URL. A public
-publishable/anon key is not enough for this script unless you pass an admin
-`SUPABASE_ACCESS_TOKEN` instead.
+Use a service role key or another approved admin credential when running image upload scripts.
 
-## Flutter build config
+## Handoff Rule
 
-Build/run Flutter web with:
+If a document or old note says live payments, emails, taxes, inventory, or labels are not wired, check the current root handoff docs first.
 
-```sh
-flutter run -d chrome \
-  --dart-define=SUPABASE_URL="https://devtecknxpgdhbkdjnvt.supabase.co" \
-  --dart-define=SUPABASE_ANON_KEY="sb_publishable_AwMJ5ir84BN_d0LLmtl5IQ_R9ZqlNkj" \
-  --dart-define=SUPABASE_PRODUCT_BUCKET="product-images"
-```
+The current owner-facing source of truth starts at:
 
-The web gateway calls Supabase REST, Auth, and Storage directly.
+`README.md`

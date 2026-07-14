@@ -20,17 +20,35 @@ class StoreDataGateway {
   static const _refreshTokenKey = 'egbeanom.supabase.refresh_token';
   static final Set<String> _missingLiveColumns = {};
 
-  String? get _accessToken => html.window.localStorage[_accessTokenKey];
-  String? get _refreshToken => html.window.localStorage[_refreshTokenKey];
+  String? get _accessToken => html.window.sessionStorage[_accessTokenKey];
+  String? get _refreshToken => html.window.sessionStorage[_refreshTokenKey];
 
-  Future<List<Map<String, dynamic>>> fetchProducts() async {
-    final data = await _rest(
-      'products',
-      query: {
-        'select': '*,product_images(*),product_variants(*)',
-        'order': 'sort_order.asc,name.asc',
-      },
-    );
+  Future<List<Map<String, dynamic>>> fetchProducts() =>
+      fetchProductsPage(limit: 500);
+
+  Future<List<Map<String, dynamic>>> fetchProductsPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+    String categoryId = '',
+  }) async {
+    final query = {
+      'select': '*,product_images(*),product_variants(*)',
+      'order': 'sort_order.asc,name.asc',
+      'limit': '${_boundedLimit(limit)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    final normalizedSearch = search.trim();
+    if (normalizedSearch.isNotEmpty) {
+      final pattern = _ilikePattern(normalizedSearch);
+      query['or'] =
+          '(name.ilike.$pattern,sku.ilike.$pattern,type.ilike.$pattern)';
+    }
+    if (categoryId.trim().isNotEmpty &&
+        categoryId.trim().toLowerCase() != 'all') {
+      query['category_id'] = 'eq.${categoryId.trim()}';
+    }
+    final data = await _rest('products', query: query);
     return _rows(data);
   }
 
@@ -56,12 +74,56 @@ class StoreDataGateway {
       _list('fragrance_seasons', order: 'sort_order.asc,name.asc');
   Future<List<Map<String, dynamic>>> fetchFragranceOccasions() =>
       _list('fragrance_occasions', order: 'sort_order.asc,name.asc');
-  Future<List<Map<String, dynamic>>> fetchOrders() async {
-    final orders = _rows(
-      await _rest('orders', query: {'select': '*', 'order': 'created_at.desc'}),
-    );
+  Future<List<Map<String, dynamic>>> fetchOrders() =>
+      fetchOrdersPage(limit: 500);
+
+  Future<List<Map<String, dynamic>>> fetchOrdersPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+    String status = '',
+    String financialStatus = '',
+    String shippingPriority = '',
+  }) async {
+    final query = {
+      'select': '*',
+      'order': 'created_at.desc',
+      'limit': '${_boundedLimit(limit)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    final normalizedSearch = search.trim();
+    if (normalizedSearch.isNotEmpty) {
+      final pattern = _ilikePattern(normalizedSearch);
+      query['or'] =
+          '(order_number.ilike.$pattern,customer_name.ilike.$pattern,email.ilike.$pattern,tracking_number.ilike.$pattern)';
+    }
+    if (_isConcreteFilter(status)) {
+      query['status'] = 'eq.${status.trim()}';
+    }
+    if (_isConcreteFilter(financialStatus)) {
+      query['financial_status'] = 'eq.${financialStatus.trim()}';
+    }
+    if (_isConcreteFilter(shippingPriority)) {
+      query['shipping_priority'] = 'eq.${shippingPriority.trim()}';
+    }
+    final orders = _rows(await _rest('orders', query: query));
     try {
-      final items = _rows(await _rest('order_items', query: {'select': '*'}));
+      final orderIds = orders
+          .map((order) => '${order['order_number'] ?? order['id']}'.trim())
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final items = orderIds.isEmpty
+          ? <Map<String, dynamic>>[]
+          : _rows(
+              await _rest(
+                'order_items',
+                query: {
+                  'select': '*',
+                  'order_id': 'in.(${orderIds.join(',')})',
+                  'order': 'id.asc',
+                },
+              ),
+            );
       for (final order in orders) {
         final orderKey = '${order['order_number'] ?? order['id']}';
         order['order_items'] = items
@@ -77,23 +139,166 @@ class StoreDataGateway {
   }
 
   Future<List<Map<String, dynamic>>> fetchCustomerAccounts() =>
-      _list('store_customers', order: 'name.asc,email.asc');
+      fetchCustomerAccountsPage(limit: 500);
+  Future<List<Map<String, dynamic>>> fetchCustomerAccountsPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+  }) {
+    final query = {
+      'select': '*',
+      'order': 'name.asc,email.asc',
+      'limit': '${_boundedLimit(limit)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    final normalizedSearch = search.trim();
+    if (normalizedSearch.isNotEmpty) {
+      final pattern = _ilikePattern(normalizedSearch);
+      query['or'] =
+          '(name.ilike.$pattern,email.ilike.$pattern,phone.ilike.$pattern)';
+    }
+    return _listQuery('store_customers', query);
+  }
+
   Future<List<Map<String, dynamic>>> fetchReviews() =>
-      _list('store_reviews', order: 'created_at.desc');
+      fetchReviewsPage(limit: 500);
+  Future<List<Map<String, dynamic>>> fetchReviewsPage({
+    int limit = 100,
+    int offset = 0,
+    String status = '',
+    String search = '',
+  }) {
+    final query = {
+      'select': '*',
+      'order': 'created_at.desc',
+      'limit': '${_boundedLimit(limit)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    if (_isConcreteFilter(status)) {
+      query['status'] = 'eq.${status.trim()}';
+    }
+    final normalizedSearch = search.trim();
+    if (normalizedSearch.isNotEmpty) {
+      final pattern = _ilikePattern(normalizedSearch);
+      query['or'] =
+          '(customer_name.ilike.$pattern,email.ilike.$pattern,product_name.ilike.$pattern,comment.ilike.$pattern)';
+    }
+    return _listQuery('store_reviews', query);
+  }
+
   Future<List<Map<String, dynamic>>> fetchNotifications() =>
       _list('admin_notifications', order: 'created_at.desc');
+  Future<List<Map<String, dynamic>>> fetchDailyMetrics() =>
+      fetchDailyMetricsPage(limit: 366);
+  Future<List<Map<String, dynamic>>> fetchDailyMetricsPage({
+    int limit = 366,
+    int offset = 0,
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final query = {
+      'select': '*',
+      'order': 'day.asc',
+      'limit': '${_boundedLimit(limit, max: 1095)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    if (from != null && to != null) {
+      query['and'] =
+          '(day.gte.${from.toIso8601String().split('T').first},day.lte.${to.toIso8601String().split('T').first})';
+    } else if (from != null) {
+      query['day'] = 'gte.${from.toIso8601String().split('T').first}';
+    } else if (to != null) {
+      query['day'] = 'lte.${to.toIso8601String().split('T').first}';
+    }
+    return _listQuery('analytics_daily_metrics', query);
+  }
+
+  Future<List<Map<String, dynamic>>> fetchActiveUserSessions() async {
+    final cutoff = DateTime.now()
+        .subtract(const Duration(minutes: 30))
+        .toUtc()
+        .toIso8601String();
+    final data = await _rest(
+      'analytics_sessions',
+      query: {
+        'select': '*',
+        'last_seen_at': 'gte.$cutoff',
+        'order': 'last_seen_at.desc',
+      },
+    );
+    return _rows(data);
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAnalyticsEvents({
+    int limit = 1000,
+    int offset = 0,
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final query = {
+      'select': '*',
+      'order': 'occurred_at.desc',
+      'limit': '${_boundedLimit(limit, max: 5000)}',
+      'offset': '${_boundedOffset(offset)}',
+    };
+    if (from != null && to != null) {
+      query['and'] =
+          '(occurred_at.gte.${from.toUtc().toIso8601String()},occurred_at.lte.${to.toUtc().toIso8601String()})';
+    } else if (from != null) {
+      query['occurred_at'] = 'gte.${from.toUtc().toIso8601String()}';
+    } else if (to != null) {
+      query['occurred_at'] = 'lte.${to.toUtc().toIso8601String()}';
+    }
+    return _listQuery('analytics_events', query);
+  }
+
+  Future<List<Map<String, dynamic>>> fetchActiveCarts() =>
+      _list('active_carts', order: 'last_seen_at.desc');
+
   Future<List<Map<String, dynamic>>> fetchBackendUsers() =>
       _list('backend_users', order: 'name.asc,email.asc');
 
   Future<Map<String, dynamic>?> fetchSiteStatus() =>
       _setting('storefront_status');
-  Future<Map<String, dynamic>?> fetchEmailServerSettings() =>
-      _setting('email_server_settings');
-  Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() =>
-      _setting('shipping_carrier_credentials');
+  Future<Map<String, dynamic>?> fetchEmailServerSettings() async {
+    final encrypted = await _fetchCredential(
+      providerType: 'email_server',
+      providerName: 'default',
+    );
+    if (encrypted != null) {
+      return {'key': 'email_server_settings', 'value': encrypted};
+    }
+    return _setting('email_server_settings');
+  }
+
+  Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() async {
+    final encrypted = await _fetchCredential(
+      providerType: 'shipping_carrier',
+      providerName: 'default',
+    );
+    if (encrypted != null) {
+      return {'key': 'shipping_carrier_credentials', 'value': encrypted};
+    }
+    return _setting('shipping_carrier_credentials');
+  }
+
   Future<Map<String, dynamic>?> fetchShippingCarrierCredentialsForCarrier(
     String carrier,
-  ) => _setting(_shippingCarrierCredentialsKey(carrier));
+  ) async {
+    final providerName = carrier.trim().toLowerCase();
+    final encrypted = await _fetchCredential(
+      providerType: 'shipping_carrier',
+      providerName: providerName,
+    );
+    if (encrypted != null) {
+      return {
+        'key': _shippingCarrierCredentialsKey(carrier),
+        'value': encrypted,
+      };
+    }
+    return _setting(_shippingCarrierCredentialsKey(carrier));
+  }
+
   Future<Map<String, dynamic>?> fetchStoreInfo() async {
     final data = await _rest(
       'store_info',
@@ -216,6 +421,12 @@ class StoreDataGateway {
     return rows.isEmpty ? null : rows.first;
   }
 
+  Future<Map<String, dynamic>?> findRedeemableCoupon(String code) async {
+    final response = await _rpc('find_redeemable_coupon', {'p_code': code});
+    final rows = _rows(response);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<void> upsertFragranceNote(Map<String, dynamic> note) =>
       _upsert('fragrance_notes', note);
   Future<void> upsertPaymentMethod(Map<String, dynamic> method) async {
@@ -255,8 +466,127 @@ class StoreDataGateway {
 
   Future<void> upsertContentBlock(Map<String, dynamic> block) =>
       _upsert('content_blocks', block);
-  Future<void> upsertOrder(Map<String, dynamic> order) =>
-      _upsert('orders', order);
+  Future<void> upsertOrder(Map<String, dynamic> order) async {
+    final row = Map<String, dynamic>.from(order)..remove('id');
+    final copy = Map<String, dynamic>.from(row);
+    for (final marker in _missingLiveColumns) {
+      if (!marker.startsWith('orders.')) {
+        continue;
+      }
+      copy.remove(marker.substring('orders.'.length));
+    }
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        if (_isPendingCheckoutInsert(copy)) {
+          try {
+            await _rest(
+              'orders',
+              method: 'POST',
+              body: copy,
+              returnRepresentation: false,
+            );
+          } catch (error) {
+            if (!_isDuplicateRowFailure('$error')) {
+              rethrow;
+            }
+            await _patchOrderByOrderNumber(copy);
+          }
+        } else {
+          await _patchOrderByOrderNumber(copy);
+        }
+        return;
+      } catch (error) {
+        final missingColumn = _missingColumnFromError('$error');
+        if (missingColumn == null) {
+          rethrow;
+        }
+        _missingLiveColumns.add('orders.$missingColumn');
+        copy.remove(missingColumn);
+      }
+    }
+    throw StateError('Could not save order with the live Supabase schema.');
+  }
+
+  bool _isPendingCheckoutInsert(Map<String, dynamic> order) {
+    final status = '${order['status'] ?? ''}'.trim().toLowerCase();
+    final financialStatus = '${order['financial_status'] ?? ''}'
+        .trim()
+        .toLowerCase();
+    return status == 'pending' && financialStatus == 'unpaid';
+  }
+
+  bool _isDuplicateRowFailure(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('duplicate key') ||
+        lower.contains('23505') ||
+        lower.contains('409');
+  }
+
+  Future<void> _patchOrderByOrderNumber(Map<String, dynamic> order) async {
+    final orderNumber = '${order['order_number'] ?? ''}'.trim();
+    if (orderNumber.isEmpty) {
+      throw StateError('Order save requires an order number.');
+    }
+    if (_shouldMarkCheckoutPaidWithRpc(order)) {
+      final marked = await _markCheckoutOrderPaid(orderNumber, order);
+      if (marked) {
+        return;
+      }
+    }
+    await _rest(
+      'orders',
+      method: 'PATCH',
+      query: {'order_number': 'eq.$orderNumber'},
+      body: order,
+      returnRepresentation: false,
+    );
+  }
+
+  bool _shouldMarkCheckoutPaidWithRpc(Map<String, dynamic> order) {
+    final financialStatus = '${order['financial_status'] ?? ''}'
+        .trim()
+        .toLowerCase();
+    final email = '${order['email'] ?? ''}'.trim();
+    return _accessToken == null &&
+        financialStatus == 'paid' &&
+        email.isNotEmpty;
+  }
+
+  Future<bool> _markCheckoutOrderPaid(
+    String orderNumber,
+    Map<String, dynamic> order,
+  ) async {
+    final response = await _rpc('mark_checkout_order_paid', {
+      'p_order_number': orderNumber,
+      'p_email': '${order['email'] ?? ''}'.trim(),
+      'p_payment_provider': '${order['payment_provider'] ?? ''}'.trim(),
+      'p_payment_reference': '${order['payment_reference'] ?? ''}'.trim(),
+    });
+    return response == true || '$response'.toLowerCase() == 'true';
+  }
+
+  Future<bool> decrementInventoryForOrder({
+    required String orderNumber,
+    required String email,
+  }) async {
+    final response = await _rpc('decrement_inventory_for_order', {
+      'p_order_number': orderNumber,
+      'p_email': email.trim(),
+    });
+    return response == true || '$response'.toLowerCase() == 'true';
+  }
+
+  Future<bool> restockInventoryForOrder({
+    required String orderNumber,
+    required String email,
+  }) async {
+    final response = await _rpc('restock_inventory_for_order', {
+      'p_order_number': orderNumber,
+      'p_email': email.trim(),
+    });
+    return response == true || '$response'.toLowerCase() == 'true';
+  }
+
   Future<void> upsertShippingOption(Map<String, dynamic> option) =>
       _upsert('shipping_options', option);
   Future<void> deleteShippingOption(String optionId) async {
@@ -281,8 +611,10 @@ class StoreDataGateway {
     }
   }
 
-  Future<void> upsertReview(Map<String, dynamic> review) =>
-      _upsert('store_reviews', review);
+  Future<void> upsertReview(Map<String, dynamic> review) async {
+    await _insert('store_reviews', review);
+  }
+
   Future<void> updateReviewStatus(String reviewId, String status) => _rest(
     'store_reviews',
     method: 'PATCH',
@@ -293,6 +625,116 @@ class StoreDataGateway {
       _insert('order_surveys', survey);
   Future<void> insertNotification(Map<String, dynamic> notification) =>
       _insert('admin_notifications', notification);
+  Future<void> insertAdminAuditLog(Map<String, dynamic> audit) =>
+      _insert('admin_audit_log', audit);
+  Future<List<Map<String, dynamic>>> fetchWishlist(String email) async {
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty) {
+      return const [];
+    }
+    final data = await _rest(
+      'customer_wishlist',
+      query: {
+        'select': '*',
+        'customer_email': 'eq.$cleanEmail',
+        'order': 'created_at.desc',
+      },
+    );
+    return _rows(data);
+  }
+
+  Future<void> addWishlistItem({
+    required String email,
+    required int productId,
+  }) async {
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty || productId <= 0) {
+      return;
+    }
+    await _rest(
+      'customer_wishlist',
+      method: 'POST',
+      query: {'on_conflict': 'customer_email,product_id'},
+      body: {'customer_email': cleanEmail, 'product_id': productId},
+      prefer: 'resolution=merge-duplicates',
+      returnRepresentation: false,
+    );
+  }
+
+  Future<void> removeWishlistItem({
+    required String email,
+    required int productId,
+  }) async {
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty || productId <= 0) {
+      return;
+    }
+    await _rest(
+      'customer_wishlist',
+      method: 'DELETE',
+      query: {
+        'customer_email': 'eq.$cleanEmail',
+        'product_id': 'eq.$productId',
+      },
+      returnRepresentation: false,
+    );
+  }
+
+  Future<void> upsertActiveCart(Map<String, dynamic> cart) async {
+    await _rest(
+      'active_carts',
+      method: 'POST',
+      query: {'on_conflict': 'id'},
+      body: cart,
+      prefer: 'resolution=merge-duplicates',
+      returnRepresentation: false,
+    );
+  }
+
+  Future<void> markActiveCartRecovered(String cartId) async {
+    final cleanId = cartId.trim();
+    if (cleanId.isEmpty) {
+      return;
+    }
+    await _rest(
+      'active_carts',
+      method: 'PATCH',
+      query: {'id': 'eq.$cleanId'},
+      body: {
+        'status': 'recovered',
+        'recovered_at': DateTime.now().toUtc().toIso8601String(),
+        'last_seen_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      returnRepresentation: false,
+    );
+  }
+
+  Future<void> incrementDailyMetric(Map<String, dynamic> metric) async {
+    await _rpc('increment_daily_analytics', {
+      'p_day': metric['day'],
+      'p_label': metric['label'],
+      'p_new_users': metric['new_users'] ?? 0,
+      'p_visits': metric['visits'] ?? 0,
+      'p_orders': metric['orders'] ?? 0,
+      'p_revenue': metric['revenue'] ?? 0,
+    });
+  }
+
+  Future<void> upsertActiveUserSession(Map<String, dynamic> session) async {
+    await _rpc('upsert_analytics_session', {
+      'p_id': session['id'],
+      'p_visitor': session['visitor'],
+      'p_current_page': session['current_page'],
+      'p_source': session['source'],
+      'p_referrer': session['referrer'],
+      'p_device': session['device'],
+      'p_started_at': session['started_at'],
+      'p_last_seen_at': session['last_seen_at'],
+    });
+  }
+
+  Future<void> insertAnalyticsEvent(Map<String, dynamic> event) =>
+      _insert('analytics_events', event);
 
   Future<Map<String, dynamic>?> createCustomerAccount(
     Map<String, dynamic> customer,
@@ -361,6 +803,8 @@ class StoreDataGateway {
         'segment': 'New',
         'referral_code': email.split('@').first.toUpperCase(),
         'referral_credits': 0,
+        'loyalty_points': 0,
+        'referred_by': '',
         'last_login_at': DateTime.now().toUtc().toIso8601String(),
       };
       try {
@@ -394,6 +838,10 @@ class StoreDataGateway {
       },
     );
     html.window.location.assign(uri.toString());
+  }
+
+  void redirectBrowserTo(String url) {
+    html.window.location.assign(url);
   }
 
   Future<Map<String, dynamic>?> loginBackendUser(
@@ -542,6 +990,8 @@ class StoreDataGateway {
       'referral_code':
           source?['referral_code'] ?? cleanEmail.split('@').first.toUpperCase(),
       'referral_credits': source?['referral_credits'] ?? 0,
+      'loyalty_points': source?['loyalty_points'] ?? 0,
+      'referred_by': source?['referred_by'] ?? '',
       'last_login_at': DateTime.now().toUtc().toIso8601String(),
     };
   }
@@ -554,6 +1004,8 @@ class StoreDataGateway {
   }
 
   void _clearSession() {
+    html.window.sessionStorage.remove(_accessTokenKey);
+    html.window.sessionStorage.remove(_refreshTokenKey);
     html.window.localStorage.remove(_accessTokenKey);
     html.window.localStorage.remove(_refreshTokenKey);
   }
@@ -566,37 +1018,73 @@ class StoreDataGateway {
     'site_settings',
     {'key': 'storefront_status', 'value': value, 'is_public': true},
   );
-  Future<void> upsertEmailServerSettings(Map<String, dynamic> value) => _upsert(
-    'site_settings',
-    {'key': 'email_server_settings', 'value': value, 'is_public': false},
+  Future<void> upsertEmailServerSettings(Map<String, dynamic> value) =>
+      _upsertCredential(
+        providerType: 'email_server',
+        providerName: 'default',
+        credential: value,
+      );
+
+  Future<Map<String, dynamic>> sendEmail({
+    required String kind,
+    required List<String> recipients,
+    required String subject,
+    required String htmlBody,
+    String textBody = '',
+    String orderId = '',
+    String event = '',
+  }) => _function(
+    'send-email',
+    body: {
+      'kind': kind,
+      'recipients': recipients,
+      'subject': subject,
+      'htmlBody': htmlBody,
+      'textBody': textBody,
+      'orderId': orderId,
+      'event': event,
+    },
   );
   Future<void> upsertShippingCarrierCredentials(Map<String, dynamic> value) =>
-      _upsert('site_settings', {
-        'key': 'shipping_carrier_credentials',
-        'value': value,
-        'is_public': false,
-      });
+      _upsertCredential(
+        providerType: 'shipping_carrier',
+        providerName: 'default',
+        credential: value,
+      );
   Future<void> upsertShippingCarrierCredentialsForCarrier(
     String carrier,
     Map<String, dynamic> value,
-  ) => _upsert('site_settings', {
-    'key': _shippingCarrierCredentialsKey(carrier),
-    'value': value,
-    'is_public': false,
-  });
+  ) => _upsertCredential(
+    providerType: 'shipping_carrier',
+    providerName: carrier.trim().toLowerCase(),
+    credential: value,
+  );
 
   Future<Map<String, dynamic>?> fetchPaymentProcessorCredentials(
     String provider,
-  ) => _setting(_paymentProcessorCredentialsKey(provider));
+  ) async {
+    final providerName = provider.trim().toLowerCase();
+    final encrypted = await _fetchCredential(
+      providerType: 'payment_processor',
+      providerName: providerName,
+    );
+    if (encrypted != null) {
+      return {
+        'key': _paymentProcessorCredentialsKey(provider),
+        'value': encrypted,
+      };
+    }
+    return _setting(_paymentProcessorCredentialsKey(provider));
+  }
 
   Future<void> upsertPaymentProcessorCredentials(
     String provider,
     Map<String, dynamic> value,
-  ) => _upsert('site_settings', {
-    'key': _paymentProcessorCredentialsKey(provider),
-    'value': value,
-    'is_public': false,
-  });
+  ) => _upsertCredential(
+    providerType: 'payment_processor',
+    providerName: provider.trim().toLowerCase(),
+    credential: value,
+  );
 
   /// Fetch encrypted payment processor credentials from vault
   /// Uses encrypted_credentials table with pgcrypto encryption
@@ -617,16 +1105,11 @@ class StoreDataGateway {
         body: {
           'p_provider_type': 'payment_processor',
           'p_provider_name': provider.toLowerCase().trim(),
-          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+          'p_encryption_key_hex': encryptionKey,
         },
       );
 
-      if (response is! Map) {
-        return null;
-      }
-
-      final jsonStr = response['p_decrypted'] ?? response;
-      return jsonStr is String ? jsonDecode(jsonStr) : jsonStr;
+      return response is String ? jsonDecode(response) : null;
     } catch (_) {
       return null;
     }
@@ -647,7 +1130,7 @@ class StoreDataGateway {
           'p_provider_type': 'payment_processor',
           'p_provider_name': provider.toLowerCase().trim(),
           'p_credentials_json': jsonEncode(credentials),
-          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+          'p_encryption_key_hex': encryptionKey,
         },
       );
     } catch (error) {
@@ -671,16 +1154,11 @@ class StoreDataGateway {
         body: {
           'p_provider_type': 'shipping_carrier',
           'p_provider_name': carrier.toLowerCase().trim(),
-          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+          'p_encryption_key_hex': encryptionKey,
         },
       );
 
-      if (response is! Map) {
-        return null;
-      }
-
-      final jsonStr = response['p_decrypted'] ?? response;
-      return jsonStr is String ? jsonDecode(jsonStr) : jsonStr;
+      return response is String ? jsonDecode(response) : null;
     } catch (_) {
       return null;
     }
@@ -700,7 +1178,7 @@ class StoreDataGateway {
           'p_provider_type': 'shipping_carrier',
           'p_provider_name': carrier.toLowerCase().trim(),
           'p_credentials_json': jsonEncode(credentials),
-          'p_encryption_key': 'decode(\'$encryptionKey\', \'hex\')',
+          'p_encryption_key_hex': encryptionKey,
         },
       );
     } catch (error) {
@@ -737,13 +1215,55 @@ class StoreDataGateway {
         .toList();
   }
 
+  Future<String> createStripeCheckoutSession({
+    required String orderNumber,
+    required String mode,
+    required String successUrl,
+    required String cancelUrl,
+  }) async {
+    final response = await _function(
+      'stripe-checkout-session',
+      body: {
+        'orderNumber': orderNumber,
+        'mode': mode,
+        'successUrl': successUrl,
+        'cancelUrl': cancelUrl,
+      },
+    );
+    final url = '${response['url'] ?? ''}'.trim();
+    if (url.isEmpty) {
+      throw StateError(
+        'Stripe checkout session did not return a checkout URL.',
+      );
+    }
+    return url;
+  }
+
   Future<ShippingLabelResult> createUspsLabel({
     required Map<String, dynamic> order,
     required Map<String, dynamic> storeInfo,
     required Map<String, dynamic> package,
+  }) => createShippingLabel(
+    carrier: 'USPS',
+    order: order,
+    storeInfo: storeInfo,
+    package: package,
+  );
+
+  Future<ShippingLabelResult> createShippingLabel({
+    required String carrier,
+    required Map<String, dynamic> order,
+    required Map<String, dynamic> storeInfo,
+    required Map<String, dynamic> package,
   }) async {
+    final functionName = switch (carrier.trim().toUpperCase()) {
+      'UPS' => 'ups-shipping',
+      'DHL' => 'dhl-shipping',
+      'FEDEX' => 'fedex-shipping',
+      _ => 'usps-shipping',
+    };
     final response = await _function(
-      'usps-shipping',
+      functionName,
       body: {
         'action': 'createLabel',
         'order': order,
@@ -753,6 +1273,10 @@ class StoreDataGateway {
     );
     return ShippingLabelResult.fromJson(response);
   }
+
+  Future<Map<String, dynamic>> refreshTrackingStatus({
+    required String orderNumber,
+  }) => _function('tracking-status', body: {'orderNumber': orderNumber});
 
   Future<Map<String, dynamic>?> _profileForAuthUser({
     required String table,
@@ -862,6 +1386,11 @@ class StoreDataGateway {
     required bool isPrimary,
   }) async {
     _ensureConfigured();
+    _validateImageUpload(
+      fileName: fileName,
+      bytes: bytes,
+      contentType: contentType,
+    );
     final cleanName = fileName
         .split(RegExp(r'[/\\]'))
         .last
@@ -921,6 +1450,11 @@ class StoreDataGateway {
     required String contentType,
   }) async {
     _ensureConfigured();
+    _validateImageUpload(
+      fileName: fileName,
+      bytes: bytes,
+      contentType: contentType,
+    );
     final cleanName = fileName
         .split(RegExp(r'[/\\]'))
         .last
@@ -961,12 +1495,76 @@ class StoreDataGateway {
     return '$_supabaseUrl/storage/v1/object/public/$_productBucket/$encodedPath';
   }
 
+  void _validateImageUpload({
+    required String fileName,
+    required Uint8List bytes,
+    required String contentType,
+  }) {
+    const maxBytes = 8 * 1024 * 1024;
+    final extension = fileName
+        .split(RegExp(r'[/\\]'))
+        .last
+        .split('.')
+        .last
+        .toLowerCase();
+    final normalizedType = contentType.trim().toLowerCase();
+    const allowedExtensions = {'jpg', 'jpeg', 'png', 'webp', 'gif'};
+    const allowedMimeTypes = {
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    };
+    if (bytes.isEmpty) {
+      throw StateError('Upload failed: image file is empty.');
+    }
+    if (bytes.length > maxBytes) {
+      throw StateError('Upload failed: image files must be 8 MB or smaller.');
+    }
+    if (!allowedExtensions.contains(extension)) {
+      throw StateError('Upload failed: image must be JPG, PNG, WEBP, or GIF.');
+    }
+    if (!allowedMimeTypes.contains(normalizedType)) {
+      throw StateError('Upload failed: unsupported image type $contentType.');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _list(
     String table, {
     required String order,
   }) async {
     final data = await _rest(table, query: {'select': '*', 'order': order});
     return _rows(data);
+  }
+
+  Future<List<Map<String, dynamic>>> _listQuery(
+    String table,
+    Map<String, String> query,
+  ) async {
+    final data = await _rest(table, query: query);
+    return _rows(data);
+  }
+
+  int _boundedLimit(int value, {int max = 500}) {
+    if (value <= 0) {
+      return 100;
+    }
+    return value > max ? max : value;
+  }
+
+  int _boundedOffset(int value) => value < 0 ? 0 : value;
+
+  bool _isConcreteFilter(String value) {
+    final clean = value.trim().toLowerCase();
+    return clean.isNotEmpty && clean != 'all';
+  }
+
+  String _ilikePattern(String value) {
+    final escaped = value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('*', r'\*');
+    return '*$escaped*';
   }
 
   Future<Map<String, dynamic>?> _setting(String key) async {
@@ -976,6 +1574,42 @@ class StoreDataGateway {
     );
     final rows = _rows(data);
     return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<Map<String, dynamic>?> _fetchCredential({
+    required String providerType,
+    required String providerName,
+  }) async {
+    try {
+      final response = await _function(
+        'credential-vault',
+        body: {
+          'action': 'get',
+          'providerType': providerType,
+          'providerName': providerName,
+        },
+      );
+      final credential = response['credential'];
+      return credential is Map ? credential.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _upsertCredential({
+    required String providerType,
+    required String providerName,
+    required Map<String, dynamic> credential,
+  }) async {
+    await _function(
+      'credential-vault',
+      body: {
+        'action': 'upsert',
+        'providerType': providerType,
+        'providerName': providerName,
+        'credential': credential,
+      },
+    );
   }
 
   String _shippingCarrierCredentialsKey(String carrier) {
@@ -1003,7 +1637,7 @@ class StoreDataGateway {
   }
 
   Future<void> _insert(String table, Object rows) async {
-    await _rest(table, method: 'POST', body: rows);
+    await _rest(table, method: 'POST', body: rows, returnRepresentation: false);
   }
 
   Future<dynamic> _rest(
@@ -1018,6 +1652,17 @@ class StoreDataGateway {
     final uri = Uri.parse(
       '$_supabaseUrl/rest/v1/$table',
     ).replace(queryParameters: query);
+    String? encodedBody;
+    if (body != null) {
+      final safeBody = _sanitizeJsonValue(body, '$table.body');
+      try {
+        encodedBody = jsonEncode(safeBody);
+      } catch (error) {
+        throw StateError(
+          'Supabase database $method $table payload could not be encoded as JSON: $error',
+        );
+      }
+    }
     final headers = {
       'apikey': _supabaseAnonKey,
       'Authorization': 'Bearer ${_accessToken ?? _supabaseAnonKey}',
@@ -1032,7 +1677,7 @@ class StoreDataGateway {
         uri.toString(),
         method: method,
         requestHeaders: headers,
-        sendData: body == null ? null : jsonEncode(body),
+        sendData: encodedBody,
       ).timeout(const Duration(seconds: 20));
     } catch (error) {
       throw StateError(
@@ -1040,6 +1685,27 @@ class StoreDataGateway {
       );
     }
     return _decodeResponse(request, 'Supabase request failed');
+  }
+
+  Future<dynamic> _rpc(String name, Map<String, dynamic> body) async {
+    _ensureConfigured();
+    final safeBody = _sanitizeJsonValue(body, 'rpc.$name.body');
+    late final html.HttpRequest request;
+    try {
+      request = await html.HttpRequest.request(
+        '$_supabaseUrl/rest/v1/rpc/$name',
+        method: 'POST',
+        requestHeaders: {
+          'apikey': _supabaseAnonKey,
+          'Authorization': 'Bearer ${_accessToken ?? _supabaseAnonKey}',
+          'Content-Type': 'application/json',
+        },
+        sendData: jsonEncode(safeBody),
+      ).timeout(const Duration(seconds: 20));
+    } catch (error) {
+      throw StateError(_networkFailureMessage('Supabase RPC $name', error));
+    }
+    return _decodeResponse(request, 'Supabase RPC $name failed');
   }
 
   Future<Map<String, dynamic>> _function(
@@ -1060,6 +1726,15 @@ class StoreDataGateway {
         sendData: jsonEncode(body),
       ).timeout(const Duration(seconds: 45));
     } catch (error) {
+      if (name == 'send-email') {
+        throw StateError(
+          'Supabase function send-email did not return a browser-readable '
+          'response. This usually means the function crashed during startup '
+          'or CORS blocked the admin page origin. Confirm the latest '
+          'send-email function is deployed, then check Supabase function logs. '
+          'Original error: $error',
+        );
+      }
       throw StateError(
         _networkFailureMessage('Supabase function $name', error),
       );
@@ -1088,6 +1763,8 @@ class StoreDataGateway {
         _storeSession(auth);
         return await _fetchAuthUser();
       } catch (_) {
+        html.window.sessionStorage.remove(_accessTokenKey);
+        html.window.sessionStorage.remove(_refreshTokenKey);
         html.window.localStorage.remove(_accessTokenKey);
         html.window.localStorage.remove(_refreshTokenKey);
         return null;
@@ -1160,15 +1837,55 @@ class StoreDataGateway {
         raw.contains('request failed before a response was received');
   }
 
+  dynamic _sanitizeJsonValue(dynamic value, String path) {
+    if (value == null || value is String || value is bool) {
+      return value;
+    }
+    if (value is num) {
+      return value.isFinite ? value : 0;
+    }
+    if (value is DateTime) {
+      return value.toUtc().toIso8601String();
+    }
+    if (value is List) {
+      return [
+        for (var i = 0; i < value.length; i++)
+          _sanitizeJsonValue(value[i], '$path[$i]'),
+      ];
+    }
+    if (value is Map) {
+      final sanitized = <String, dynamic>{};
+      for (final entry in value.entries) {
+        final key = '${entry.key}';
+        sanitized[key] = _sanitizeJsonValue(entry.value, '$path.$key');
+      }
+      return sanitized;
+    }
+    throw StateError(
+      'Unsupported value in Supabase payload at $path (${value.runtimeType}).',
+    );
+  }
+
   dynamic _decodeResponse(html.HttpRequest request, String label) {
     final status = request.status ?? 0;
     final raw = request.responseText ?? '';
     final decoded = raw.trim().isEmpty ? null : _tryDecodeJson(raw);
     if (status < 200 || status >= 300) {
-      final message = decoded is Map
-          ? (decoded['msg'] ?? decoded['message'] ?? decoded['error'])
-          : raw;
-      throw StateError('$label: $message');
+      if (decoded is Map) {
+        final message =
+            '${decoded['msg'] ?? decoded['message'] ?? decoded['error'] ?? 'HTTP $status'}';
+        final code = '${decoded['code'] ?? ''}'.trim();
+        final details = '${decoded['details'] ?? ''}'.trim();
+        final hint = '${decoded['hint'] ?? ''}'.trim();
+        final extras = <String>[
+          if (code.isNotEmpty) 'code=$code',
+          if (details.isNotEmpty) 'details=$details',
+          if (hint.isNotEmpty) 'hint=$hint',
+        ];
+        final suffix = extras.isEmpty ? '' : ' (${extras.join('; ')})';
+        throw StateError('$label: $message$suffix');
+      }
+      throw StateError('$label: ${raw.isEmpty ? 'HTTP $status' : raw}');
     }
     return decoded;
   }
@@ -1199,10 +1916,12 @@ class StoreDataGateway {
     final accessToken = auth['access_token'];
     final refreshToken = auth['refresh_token'];
     if (accessToken is String && accessToken.isNotEmpty) {
-      html.window.localStorage[_accessTokenKey] = accessToken;
+      html.window.sessionStorage[_accessTokenKey] = accessToken;
+      html.window.localStorage.remove(_accessTokenKey);
     }
     if (refreshToken is String && refreshToken.isNotEmpty) {
-      html.window.localStorage[_refreshTokenKey] = refreshToken;
+      html.window.sessionStorage[_refreshTokenKey] = refreshToken;
+      html.window.localStorage.remove(_refreshTokenKey);
     }
   }
 
@@ -1215,10 +1934,12 @@ class StoreDataGateway {
     final accessToken = params['access_token'];
     final refreshToken = params['refresh_token'];
     if (accessToken != null && accessToken.isNotEmpty) {
-      html.window.localStorage[_accessTokenKey] = accessToken;
+      html.window.sessionStorage[_accessTokenKey] = accessToken;
+      html.window.localStorage.remove(_accessTokenKey);
     }
     if (refreshToken != null && refreshToken.isNotEmpty) {
-      html.window.localStorage[_refreshTokenKey] = refreshToken;
+      html.window.sessionStorage[_refreshTokenKey] = refreshToken;
+      html.window.localStorage.remove(_refreshTokenKey);
     }
     html.window.history.replaceState(
       null,

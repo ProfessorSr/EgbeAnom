@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orders - EgbeAnom Admin Guide</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="book-top">
+      <h1>EgbeAnom Admin Guide</h1>
+      <p>Plain-English instructions for running the store.</p>
+    </header>
+    <section class="book-grid">
+      <nav class="nav-card"><h2>Guide Pages</h2><ul><li><a href="overview.html">Overview</a></li><li><a href="catalog.html">Catalog</a></li><li><a href="categories.html">Categories</a></li><li><a href="inventory.html">Inventory</a></li><li><a href="carts.html">Carts</a></li><li><a href="promotions.html">Promotions</a></li><li><a href="payments.html">Payments</a></li><li><a href="shipping.html">Shipping</a></li><li><a href="content.html">Content</a></li><li><a href="customers.html">Customers</a></li><li><a class="active" href="orders.html">Orders</a></li><li><a href="invoices.html">Invoices</a></li><li><a href="reviews.html">Reviews</a></li><li><a href="alerts.html">Alerts</a></li><li><a href="email.html">Email</a></li><li><a href="site.html">Site</a></li><li><a href="store-info.html">Store Info</a></li><li><a href="taxes.html">Taxes</a></li><li><a href="users.html">Users</a></li><li><a href="analytics.html">Analytics</a></li><li><a href="reports.html">Reports</a></li></ul></nav>
+      <article class="page-card">
+        <span class="eyebrow">Admin Page</span>
+<h1>Orders</h1>
+<p>Use this every day to process orders.</p>
+<h2>Payment And Fulfillment Status</h2>
+<ul><li>When a customer places an order, it is saved as pending and unpaid before Stripe payment finishes.</li><li>After Stripe payment succeeds, financial status changes to paid.</li><li>New paid orders should have order status Pending.</li></ul>
+<h2>Order Status Meanings</h2>
+<ul><li>Pending means the paid order is new and needs work.</li><li>Processing means the pack list was printed and the order is being picked.</li><li>Invoice created means the invoice was created or printed.</li><li>Label created means the shipping label was created.</li><li>Sent or Shipped means the package has been sent.</li><li>Delivered means the customer received it.</li><li>Cancelled means the order should not be fulfilled.</li></ul>
+<h2>Normal Order Flow</h2>
+<ul><li>Print the pack list. The order becomes Processing.</li><li>Create or print the invoice. The order becomes Invoice created.</li><li>Create the shipping label. The order becomes Label created.</li><li>When the package leaves, mark it Sent. The order becomes shipped.</li></ul>
+<h2>Filters</h2>
+<ul><li>Shipping type filter should show standard, priority, priority one day, ground, and all.</li><li>Order status filter should show pending, processing, invoice created, label created, sent, delivered, cancelled, and all.</li><li>Financial status filter helps you avoid shipping unpaid orders.</li></ul>
+<h2>Batch Printing</h2>
+<ul><li>You can select many orders and print invoices, pack lists, or labels.</li><li>Each invoice or pack list should print on its own 8.5 x 11 inch page.</li><li>If only one prints during batch work, stop and ask a technical helper to check the browser print window and batch print page.</li></ul>
+<div class="next-box"><a href="index.html">Back to guide home</a></div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

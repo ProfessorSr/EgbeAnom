@@ -6,6 +6,12 @@ class StoreDataGateway {
   const StoreDataGateway();
 
   Future<List<Map<String, dynamic>>> fetchProducts() async => [];
+  Future<List<Map<String, dynamic>>> fetchProductsPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+    String categoryId = '',
+  }) async => [];
   Future<List<Map<String, dynamic>>> fetchCategories() async => [];
   Future<List<Map<String, dynamic>>> fetchContentBlocks() async => [];
   Future<List<Map<String, dynamic>>> fetchCouponRules() async => [];
@@ -18,9 +24,43 @@ class StoreDataGateway {
   Future<List<Map<String, dynamic>>> fetchFragranceSeasons() async => [];
   Future<List<Map<String, dynamic>>> fetchFragranceOccasions() async => [];
   Future<List<Map<String, dynamic>>> fetchOrders() async => [];
+  Future<List<Map<String, dynamic>>> fetchOrdersPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+    String status = '',
+    String financialStatus = '',
+    String shippingPriority = '',
+  }) async => [];
   Future<List<Map<String, dynamic>>> fetchCustomerAccounts() async => [];
+  Future<List<Map<String, dynamic>>> fetchCustomerAccountsPage({
+    int limit = 100,
+    int offset = 0,
+    String search = '',
+  }) async => [];
   Future<List<Map<String, dynamic>>> fetchReviews() async => [];
+  Future<List<Map<String, dynamic>>> fetchReviewsPage({
+    int limit = 100,
+    int offset = 0,
+    String status = '',
+    String search = '',
+  }) async => [];
   Future<List<Map<String, dynamic>>> fetchNotifications() async => [];
+  Future<List<Map<String, dynamic>>> fetchDailyMetrics() async => [];
+  Future<List<Map<String, dynamic>>> fetchDailyMetricsPage({
+    int limit = 366,
+    int offset = 0,
+    DateTime? from,
+    DateTime? to,
+  }) async => [];
+  Future<List<Map<String, dynamic>>> fetchActiveUserSessions() async => [];
+  Future<List<Map<String, dynamic>>> fetchAnalyticsEvents({
+    int limit = 1000,
+    int offset = 0,
+    DateTime? from,
+    DateTime? to,
+  }) async => [];
+  Future<List<Map<String, dynamic>>> fetchActiveCarts() async => [];
   Future<Map<String, dynamic>?> fetchSiteStatus() async => null;
   Future<Map<String, dynamic>?> fetchEmailServerSettings() async => null;
   Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() async => null;
@@ -42,6 +82,7 @@ class StoreDataGateway {
   Future<Map<String, dynamic>?> upsertCouponRule(
     Map<String, dynamic> coupon,
   ) async => coupon;
+  Future<Map<String, dynamic>?> findRedeemableCoupon(String code) async => null;
   Future<void> upsertFragranceNote(Map<String, dynamic> note) async {}
   Future<void> upsertPaymentMethod(Map<String, dynamic> method) async {}
   Future<void> upsertContentBlock(Map<String, dynamic> block) async {}
@@ -52,10 +93,33 @@ class StoreDataGateway {
   Future<void> upsertTaxRule(Map<String, dynamic> rule) async {}
   Future<void> deleteTaxRule(String ruleId) async {}
   Future<void> insertOrderItems(List<Map<String, dynamic>> items) async {}
+  Future<bool> decrementInventoryForOrder({
+    required String orderNumber,
+    required String email,
+  }) async => true;
+  Future<bool> restockInventoryForOrder({
+    required String orderNumber,
+    required String email,
+  }) async => true;
   Future<void> upsertReview(Map<String, dynamic> review) async {}
   Future<void> updateReviewStatus(String reviewId, String status) async {}
   Future<void> insertOrderSurvey(Map<String, dynamic> survey) async {}
   Future<void> insertNotification(Map<String, dynamic> notification) async {}
+  Future<void> insertAdminAuditLog(Map<String, dynamic> audit) async {}
+  Future<List<Map<String, dynamic>>> fetchWishlist(String email) async => [];
+  Future<void> addWishlistItem({
+    required String email,
+    required int productId,
+  }) async {}
+  Future<void> removeWishlistItem({
+    required String email,
+    required int productId,
+  }) async {}
+  Future<void> upsertActiveCart(Map<String, dynamic> cart) async {}
+  Future<void> markActiveCartRecovered(String cartId) async {}
+  Future<void> incrementDailyMetric(Map<String, dynamic> metric) async {}
+  Future<void> upsertActiveUserSession(Map<String, dynamic> session) async {}
+  Future<void> insertAnalyticsEvent(Map<String, dynamic> event) async {}
   Future<Map<String, dynamic>?> createCustomerAccount(
     Map<String, dynamic> customer,
     String password,
@@ -65,6 +129,8 @@ class StoreDataGateway {
     String password,
   ) async => null;
   Future<void> loginCustomerWithOAuth(String provider) async {}
+
+  void redirectBrowserTo(String url) {}
   Future<Map<String, dynamic>?> loginBackendUser(
     String email,
     String password,
@@ -76,6 +142,15 @@ class StoreDataGateway {
   Future<void> upsertBlockedIp(Map<String, dynamic> blockedIp) async {}
   Future<void> upsertSiteStatus(Map<String, dynamic> value) async {}
   Future<void> upsertEmailServerSettings(Map<String, dynamic> value) async {}
+  Future<Map<String, dynamic>> sendEmail({
+    required String kind,
+    required List<String> recipients,
+    required String subject,
+    required String htmlBody,
+    String textBody = '',
+    String orderId = '',
+    String event = '',
+  }) async => {'sent': recipients.length};
   Future<void> upsertShippingCarrierCredentials(
     Map<String, dynamic> value,
   ) async {}
@@ -97,7 +172,27 @@ class StoreDataGateway {
   Future<List<ShippingRateQuote>> quoteShippingRates(
     ShippingRateRequest request,
   ) async => const [];
+
+  Future<String> createStripeCheckoutSession({
+    required String orderNumber,
+    required String mode,
+    required String successUrl,
+    required String cancelUrl,
+  }) async => '';
+
   Future<ShippingLabelResult> createUspsLabel({
+    required Map<String, dynamic> order,
+    required Map<String, dynamic> storeInfo,
+    required Map<String, dynamic> package,
+  }) async => createShippingLabel(
+    carrier: 'USPS',
+    order: order,
+    storeInfo: storeInfo,
+    package: package,
+  );
+
+  Future<ShippingLabelResult> createShippingLabel({
+    required String carrier,
     required Map<String, dynamic> order,
     required Map<String, dynamic> storeInfo,
     required Map<String, dynamic> package,
@@ -108,6 +203,10 @@ class StoreDataGateway {
     labelContentType: 'application/pdf',
     labelBase64: '',
   );
+
+  Future<Map<String, dynamic>> refreshTrackingStatus({
+    required String orderNumber,
+  }) async => {};
 
   Future<String> uploadProductImageBytes({
     required int productId,

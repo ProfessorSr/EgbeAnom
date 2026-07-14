@@ -33,8 +33,18 @@ CREATE INDEX IF NOT EXISTS idx_order_items_order_id
 ON public.order_items(order_id);
 
 -- Daily metrics time-series queries
-CREATE INDEX IF NOT EXISTS idx_daily_metrics_date_desc 
-ON public.daily_metrics(metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_daily_metrics_day_desc
+ON public.analytics_daily_metrics(day DESC);
+
+-- Event-level analytics queries for GA-style reports
+CREATE INDEX IF NOT EXISTS idx_analytics_events_occurred_desc
+ON public.analytics_events(occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_event_occurred
+ON public.analytics_events(event_name, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_session
+ON public.analytics_events(session_id);
 
 -- Settings lookups by key (frequently accessed)
 CREATE INDEX IF NOT EXISTS idx_site_settings_key 
@@ -62,7 +72,8 @@ ANALYZE public.order_items;
 ANALYZE public.store_customers;
 ANALYZE public.store_reviews;
 ANALYZE public.products;
-ANALYZE public.daily_metrics;
+ANALYZE public.analytics_daily_metrics;
+ANALYZE public.analytics_events;
 ANALYZE public.site_settings;
 ANALYZE public.backend_users;
 ANALYZE public.payment_methods;
