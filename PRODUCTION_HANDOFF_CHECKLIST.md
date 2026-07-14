@@ -10,14 +10,16 @@ This is the simple checklist for client handoff.
 
 ## Quick Score
 
-- Overall handoff readiness: about 92%
+- Overall handoff readiness: about 90%
 - Core fragrance-store workflow: about 95%
-- Admin and store operations: about 92%
+- Admin and store operations: about 90%
 - Checkout and Stripe sandbox flow: about 95%
-- Printing and fulfillment workflow: about 96%
-- Email workflow: about 85% until a real SMTP inbox test passes
+- Printing and fulfillment workflow: about 94%
+- Email workflow: about 98%
 - Public launch readiness: about 92%
-- Commercial platform parity: about 65%
+- Commercial platform parity: about 68%
+
+These scores are conservative on purpose. Most core features are built, but public launch should not be called 100% until at least one live payment processor is tested, final email/inbox behavior is confirmed after deployment, tax rates are reviewed, and the owner can complete the daily workflow without developer help. Carrier shipping processors are optional add-ons unless the client chooses to buy shipping labels inside the site at launch.
 
 The lower commercial-platform score is not a launch blocker. It means this custom store is strong for the current fragrance business, but it does not yet include every Shopify/BigCommerce/Square-style growth feature such as POS hardware, multi-channel selling, B2B accounts, subscriptions, multi-location inventory, advanced tax/accounting integrations, and an app marketplace.
 
@@ -26,11 +28,13 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Store info screen exists
 - [x] Store address is used by taxes, invoices, and labels
 - [~] Final live store address has been checked
+- [~] Final banner and logo upload should be tested in Site or Store Info
 
 ## Products And Inventory
 
 - [x] Products can be managed
 - [x] Photos can be managed
+- [x] Main product photo changes save to the database
 - [x] Fragrance detail fields are filled
 - [x] Inventory can be printed
 - [x] Paid orders lower inventory once
@@ -44,7 +48,7 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Success page shows order details
 - [x] Survey shows after payment
 - [~] Cancel and failed payment paths need one final manual check
-- [ ] One small live Stripe payment has been completed
+- ⚠️ One small live payment through the active payment processor, currently Stripe, has been completed
 
 ## Orders And Fulfillment
 
@@ -56,6 +60,10 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Label creation moves orders to Label created
 - [x] Sent marks orders as shipped
 - [x] Batch invoice and pack list printing exists
+- [x] Customer return requests exist
+- [x] Admin return approval or denial exists
+- [x] Approved returns create an RMA and email the customer
+- [x] Received returns can trigger Stripe refunds
 - [~] Batch print should be checked once more in the final browser
 
 ## Email
@@ -68,8 +76,25 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Processing email path exists
 - [x] Label created email path exists
 - [x] Sent/shipped email path exists
-- [ ] Real SMTP settings have been entered
-- [ ] A real test email has arrived in an inbox
+- [x] Custom domain SMTP settings have sent successfully
+- [x] Shared email template style exists
+- [x] Email footer includes support and unsubscribe wording
+- [x] QR code appears in the email footer
+- [x] Mass emails hide other recipients by sending one at a time
+- [x] Admin Email inbox exists
+- [x] Mailing list groups exist for account and non-account recipients
+- [x] SMTP sending works with the custom email domain
+- [~] Final inbox sync should be checked again after deployment
+
+## Customer Account
+
+- [x] Customer account main page uses clickable cards
+- [x] Orders card opens order history with invoices
+- [x] Credits card opens credit history and balance
+- [x] Points card opens points detail
+- [x] Referrals card opens referrals and the full referral link
+- [x] Customers can update account information
+- [x] Customers can request returns or refunds from an order
 
 ## Taxes
 
@@ -87,8 +112,8 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Flat rate per item exists
 - [x] Carrier options exist
 - [x] Address-label fallback exists
-- [~] Real carrier credentials have been entered
-- [~] Real carrier label creation has been tested
+- [x] Store can launch without live carrier processors by using flat-rate shipping and address-label printing
+- ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL if the client chooses carrier label buying inside the site
 
 ## Reports
 
@@ -98,6 +123,16 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Shipping breakdown exists
 - [x] CSV downloads exist
 - [~] Numbers should be checked against trusted sample orders
+
+## Analytics And Notifications
+
+- [x] Analytics has its own admin tab
+- [x] Analytics are stored in the database
+- [x] Admin notification bell exists
+- [x] Red unread badges appear on the bell and admin tab dropdown
+- [x] New order, review, return, and email alerts are tracked
+- [x] Browser desktop alerts and sound can be enabled
+- [~] Final browser notification permission should be checked on the client computer
 
 ## Audit Fix Backlog
 
@@ -126,7 +161,7 @@ These items came from the production-readiness audit. Keep them here until each 
 - [x] Confirm all production indexes are applied to the live database.
 - [x] Add server-side pagination/filtering for orders, customers, products, reviews, and reports.
 - [x] Add address validation before shipping labels are purchased.
-- [ ] Live-test USPS, UPS, FedEx, and DHL labels with real or sandbox carrier credentials. Use `npm run smoke-test-carrier-labels` after credentials are configured.
+- ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL labels with real or sandbox carrier credentials if the client chooses live carrier processors. Use `npm run smoke-test-carrier-labels` after credentials are configured.
 - [x] Add tracking status refresh or carrier webhook support where available.
 - [x] Add password reset and account verification test coverage.
 - [x] Add stronger audit logging for admin changes to products, prices, stock, orders, taxes, payment settings, shipping settings, and credentials.
@@ -135,7 +170,7 @@ These items came from the production-readiness audit. Keep them here until each 
 ### Code Maintainability
 
 - [~] Split the large storefront/app state file into smaller checkout, account, catalog, analytics, email, and order services. Started with reward/promotion logic extracted to `lib/app/store_reward_program.dart`.
-- [~] Split the large admin screen file into separate admin modules for orders, catalog, inventory, reports, taxes, shipping, email, and users. Started with order filtering/status workflow extracted to `lib/app/admin_order_workflow.dart`.
+- [~] Split the large admin screen file into separate admin modules for orders, catalog, inventory, reports, taxes, shipping, email, and users. Started with order filtering/status workflow extracted to `lib/app/admin_order_workflow.dart`; dashboard, overview, and report metrics now live in `lib/app/admin_metrics.dart` with focused tests.
 - [x] Move invoice, packing list, and label HTML builders into dedicated template files or renderer classes. Address labels, invoices, packing lists, and the invoice preview now live in `lib/widgets/print_templates.dart` with focused print-template tests.
 - [x] Add integration tests for checkout, Stripe success, Stripe failure, order creation, survey saving, inventory decrement, coupon limits, tax breakdown, and email sending. Local guard coverage now verifies draft order parsing, paid/failed status handoff, inventory validation, coupon limits, tax breakdown, and survey review parsing; live Stripe/SMTP checks remain in Final Sign-Off.
 - [x] Add Edge Function tests or scripted smoke tests for Stripe checkout, Stripe webhook, send-email, and shipping functions.
@@ -153,46 +188,20 @@ These items came from the production-readiness audit. Keep them here until each 
 - [x] Add structured data for products and organization SEO.
 - [x] Add canonical URLs and richer meta tags for public product pages where Flutter web routing allows it.
 
-### Ecommerce Features To Consider
+## Paid Expansions
 
-- [x] Wishlist or favorites.
-- [x] Gift cards.
-- [x] Loyalty or referral program beyond basic referral fields.
-- [ ] Wholesale pricing. Later upgrade; retail pricing only for current launch.
-- [ ] Subscription fragrance orders. Save idea for later; not part of current launch.
-- [ ] Multiple warehouses or inventory locations. Later upgrade; current launch uses one location.
-- [ ] Multiple vendors or brand expansion. Later upgrade; current launch uses one vendor.
-- [x] Better search, sorting, and filtering for larger catalogs.
-- [x] Abandoned cart reporting and follow-up.
-- [ ] Tax export workflow for state, county, city, VAT, import, and other tax totals.
+Optional paid upgrades and commercial-platform comparison items now live in:
 
-## Comparisons
+[Docs/Admin Guide/Expansions.md](./Docs/Admin%20Guide/Expansions.md)
 
-Compared with larger ecommerce platforms like Shopify, BigCommerce, WooCommerce, Square, and Wix, this custom store already has the core fragrance-store workflow: catalog, cart, Stripe checkout, admin orders, inventory, tax logic, promotions, gift cards, loyalty/referrals, reviews, email, reports, invoices, packing lists, and label workflows. The missing or later-upgrade items are:
-
-- [ ] POS/in-person checkout with card-reader hardware and automatic online/offline inventory sync.
-- [ ] Multi-channel selling integrations for Amazon, eBay, TikTok Shop, Instagram/Facebook Shop, Google Merchant Center, and product feeds.
-- [ ] B2B/wholesale pricing, customer-specific price lists, purchase orders, net terms, and company accounts.
-- [ ] Subscription/replenishment orders for recurring fragrance purchases.
-- [ ] Multi-location inventory, warehouse transfers, purchase orders, vendor receiving, and inventory forecasting.
-- [ ] Multi-currency checkout, multi-language storefront content, and deeper international localization.
-- [ ] Advanced tax automation and accounting integrations such as Avalara/TaxJar-style filing support, QuickBooks/Xero exports, and automated tax return reports.
-- [ ] Built-in fraud/risk scoring, chargeback workflow, and order-risk rules before fulfillment.
-- [ ] Accelerated wallet checkout beyond Stripe Checkout, such as saved customer wallets, Shop Pay-style one-click checkout, Apple Pay/Google Pay review, and PayPal/Venmo options if wanted.
-- [ ] Customer self-service portal for returns/RMAs, tracking lookup, invoice downloads, and saved addresses/payment preferences.
-- [ ] Customer support integrations such as live chat, help desk tickets, SMS updates, and automated post-purchase flows.
-- [ ] App/plugin marketplace or integration layer so future tools can be added without custom coding each one.
-- [ ] Mobile admin/POS app for managing orders, inventory, labels, and customer messages from a phone.
-- [ ] Enterprise operations features such as uptime status page, support SLA, staff role granularity, audit export, backups/restore drills, and disaster recovery runbook.
-- [ ] Advanced merchandising tools: bundles, product recommendations, upsells/cross-sells, waitlists/back-in-stock alerts, A/B tests, and landing-page builder.
-- [ ] Headless/API commerce features for external storefronts, mobile apps, AI shopping agents, and third-party checkout experiences.
+Keep the launch checklist focused on what is needed to hand off and go live. Use the Expansions page when the client asks what can be added later for an additional implementation cost.
 
 ## Final Sign-Off
 
 Before public launch, finish these:
 
-- [ ] live Stripe payment test
-- [ ] real SMTP inbox test
-- [ ] real carrier label test
-- [ ] final tax rate review
-- [ ] final owner walkthrough
+- ⚠️ live payment test through the active payment processor, currently Stripe
+- [~] final SMTP send and inbox sync after deployment
+- ⚠️ optional carrier label test only if carrier processors are part of launch
+- ⚠️ final tax rate review
+- ⚠️ final owner walkthrough

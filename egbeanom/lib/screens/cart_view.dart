@@ -1571,6 +1571,8 @@ class AccountView extends StatefulWidget {
     required this.onCreateAccount,
     required this.onLogin,
     required this.onOAuthLogin,
+    required this.onSaveCustomer,
+    required this.onRequestReturn,
     required this.onLogout,
   });
 
@@ -1583,13 +1585,15 @@ class AccountView extends StatefulWidget {
   onCreateAccount;
   final Future<void> Function(String email, String password) onLogin;
   final Future<void> Function(String provider) onOAuthLogin;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
+  final AsyncValueChanged<Order> onRequestReturn;
   final VoidCallback onLogout;
 
   @override
   State<AccountView> createState() => _AccountViewState();
 }
 
-enum _AccountDetailPage { home, orders, credits, points, referrals }
+enum _AccountDetailPage { home, profile, orders, credits, points, referrals }
 
 class _AccountViewState extends State<AccountView> {
   final _name = TextEditingController();
@@ -1820,45 +1824,57 @@ class _AccountViewState extends State<AccountView> {
           ],
         ),
         const SizedBox(height: 14),
-        switch (_detailPage) {
-          _AccountDetailPage.home => _CustomerAccountHome(
-            orderCount: orderCount,
-            creditBalance: customer.referralCredits,
-            loyaltyPoints: customer.loyaltyPoints,
-            referralCode: customer.referralCode,
-            onOpenOrders: () =>
-                setState(() => _detailPage = _AccountDetailPage.orders),
-            onOpenCredits: () =>
-                setState(() => _detailPage = _AccountDetailPage.credits),
-            onOpenPoints: () =>
-                setState(() => _detailPage = _AccountDetailPage.points),
-            onOpenReferrals: () =>
-                setState(() => _detailPage = _AccountDetailPage.referrals),
-          ),
-          _AccountDetailPage.orders => _CustomerOrdersPanel(
-            orders: widget.orders,
-            storeInfo: widget.storeInfo,
-            onBack: _openAccountHome,
-          ),
-          _AccountDetailPage.credits => _CustomerCreditsPanel(
-            customer: customer,
-            orders: widget.orders,
-            usedCredits: usedCredits,
-            onBack: _openAccountHome,
-          ),
-          _AccountDetailPage.points => _CustomerPointsPanel(
-            customer: customer,
-            orders: widget.orders,
-            availableCredit: availableLoyaltyCredit,
-            onBack: _openAccountHome,
-          ),
-          _AccountDetailPage.referrals => _CustomerReferralsPanel(
-            customer: customer,
-            orders: widget.orders,
-            referralLink: referralLink,
-            onBack: _openAccountHome,
-          ),
-        },
+        _CustomerAccountHome(
+          orderCount: orderCount,
+          creditBalance: customer.referralCredits,
+          loyaltyPoints: customer.loyaltyPoints,
+          referralCode: customer.referralCode,
+          onOpenProfile: () =>
+              setState(() => _detailPage = _AccountDetailPage.profile),
+          onOpenOrders: () =>
+              setState(() => _detailPage = _AccountDetailPage.orders),
+          onOpenCredits: () =>
+              setState(() => _detailPage = _AccountDetailPage.credits),
+          onOpenPoints: () =>
+              setState(() => _detailPage = _AccountDetailPage.points),
+          onOpenReferrals: () =>
+              setState(() => _detailPage = _AccountDetailPage.referrals),
+        ),
+        if (_detailPage != _AccountDetailPage.home) ...[
+          const SizedBox(height: 16),
+          switch (_detailPage) {
+            _AccountDetailPage.profile => _CustomerAccountProfilePanel(
+              customer: customer,
+              onBack: _openAccountHome,
+              onSaveCustomer: widget.onSaveCustomer,
+            ),
+            _AccountDetailPage.orders => _CustomerOrdersPanel(
+              orders: widget.orders,
+              storeInfo: widget.storeInfo,
+              onBack: _openAccountHome,
+              onRequestReturn: widget.onRequestReturn,
+            ),
+            _AccountDetailPage.credits => _CustomerCreditsPanel(
+              customer: customer,
+              orders: widget.orders,
+              usedCredits: usedCredits,
+              onBack: _openAccountHome,
+            ),
+            _AccountDetailPage.points => _CustomerPointsPanel(
+              customer: customer,
+              orders: widget.orders,
+              availableCredit: availableLoyaltyCredit,
+              onBack: _openAccountHome,
+            ),
+            _AccountDetailPage.referrals => _CustomerReferralsPanel(
+              customer: customer,
+              orders: widget.orders,
+              referralLink: referralLink,
+              onBack: _openAccountHome,
+            ),
+            _AccountDetailPage.home => const SizedBox.shrink(),
+          },
+        ],
       ],
     );
   }
@@ -1892,6 +1908,7 @@ class _CustomerAccountHome extends StatelessWidget {
     required this.creditBalance,
     required this.loyaltyPoints,
     required this.referralCode,
+    required this.onOpenProfile,
     required this.onOpenOrders,
     required this.onOpenCredits,
     required this.onOpenPoints,
@@ -1902,6 +1919,7 @@ class _CustomerAccountHome extends StatelessWidget {
   final double creditBalance;
   final int loyaltyPoints;
   final String referralCode;
+  final VoidCallback onOpenProfile;
   final VoidCallback onOpenOrders;
   final VoidCallback onOpenCredits;
   final VoidCallback onOpenPoints;
@@ -1911,12 +1929,20 @@ class _CustomerAccountHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth > 900 ? 4 : 2;
-        final width = (constraints.maxWidth - ((columns - 1) * 12)) / columns;
+        final columns = constraints.maxWidth > 980 ? 5 : 2;
+        final width = (constraints.maxWidth - ((columns - 1) * 10)) / columns;
         return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: 10,
+          runSpacing: 10,
           children: [
+            _AccountActionCard(
+              width: width,
+              icon: Icons.person_outline,
+              title: 'Profile',
+              value: 'Account info',
+              detail: 'Address, phone, email',
+              onTap: onOpenProfile,
+            ),
             _AccountActionCard(
               width: width,
               icon: Icons.receipt_long_outlined,
@@ -1976,13 +2002,13 @@ class _AccountActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: width.clamp(180, 340).toDouble(),
+      width: width.clamp(150, 240).toDouble(),
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1993,14 +2019,14 @@ class _AccountActionCard extends StatelessWidget {
                     const Icon(Icons.chevron_right),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 8),
                 Text(title, style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(height: 4),
                 Text(
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineSmall,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 4),
                 Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -2060,16 +2086,268 @@ class _AccountDetailScaffold extends StatelessWidget {
   }
 }
 
+class _CustomerAccountProfilePanel extends StatefulWidget {
+  const _CustomerAccountProfilePanel({
+    required this.customer,
+    required this.onBack,
+    required this.onSaveCustomer,
+  });
+
+  final CustomerAccount customer;
+  final VoidCallback onBack;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
+
+  @override
+  State<_CustomerAccountProfilePanel> createState() =>
+      _CustomerAccountProfilePanelState();
+}
+
+class _CustomerAccountProfilePanelState
+    extends State<_CustomerAccountProfilePanel> {
+  late final _name = TextEditingController(text: widget.customer.name);
+  late final _email = TextEditingController(text: widget.customer.email);
+  late final _phone = TextEditingController(text: widget.customer.phone);
+  late final _address1 = TextEditingController(
+    text: widget.customer.addressLine1,
+  );
+  late final _address2 = TextEditingController(
+    text: widget.customer.addressLine2,
+  );
+  late final _city = TextEditingController(text: widget.customer.city);
+  late final _county = TextEditingController(text: widget.customer.county);
+  late final _state = TextEditingController(text: widget.customer.state);
+  late final _postalCode = TextEditingController(
+    text: widget.customer.postalCode,
+  );
+  late final _country = TextEditingController(text: widget.customer.country);
+  late bool _acceptsMarketing = widget.customer.acceptsMarketing;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    _address1.dispose();
+    _address2.dispose();
+    _city.dispose();
+    _county.dispose();
+    _state.dispose();
+    _postalCode.dispose();
+    _country.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AccountDetailScaffold(
+      title: 'Profile',
+      icon: Icons.person_outline,
+      onBack: widget.onBack,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth > 680;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                    controller: _name,
+                    label: 'Full name',
+                    icon: Icons.person_outline,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                    controller: _email,
+                    label: 'Email',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                    controller: _phone,
+                    label: 'Phone',
+                    icon: Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                    controller: _country,
+                    label: 'Country',
+                    icon: Icons.public,
+                  ),
+                  _profileField(
+                    width: constraints.maxWidth,
+                    controller: _address1,
+                    label: 'Address line 1',
+                    icon: Icons.home_outlined,
+                  ),
+                  _profileField(
+                    width: constraints.maxWidth,
+                    controller: _address2,
+                    label: 'Address line 2',
+                    icon: Icons.home_work_outlined,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                    controller: _city,
+                    label: 'City',
+                    icon: Icons.location_city_outlined,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                    controller: _county,
+                    label: 'County',
+                    icon: Icons.map_outlined,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                    controller: _state,
+                    label: 'State',
+                    icon: Icons.signpost_outlined,
+                  ),
+                  _profileField(
+                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                    controller: _postalCode,
+                    label: 'ZIP / postal code',
+                    icon: Icons.local_post_office_outlined,
+                    keyboardType: TextInputType.streetAddress,
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Send me mailing list updates'),
+            subtitle: const Text(
+              'Receive fragrance releases, offers, and store updates.',
+            ),
+            value: _acceptsMarketing,
+            onChanged: _saving
+                ? null
+                : (value) => setState(
+                    () => _acceptsMarketing = value ?? _acceptsMarketing,
+                  ),
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_saving ? 'Saving' : 'Save profile'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _profileField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    double? width,
+    TextInputType? keyboardType,
+  }) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    final emailError = Validators.validateEmail(_email.text.trim());
+    if (emailError != null) {
+      _showSnack(emailError);
+      return;
+    }
+    if (_phone.text.trim().isNotEmpty) {
+      final phoneError = Validators.validatePhone(_phone.text.trim());
+      if (phoneError != null) {
+        _showSnack(phoneError);
+        return;
+      }
+    }
+    if (_address1.text.trim().isNotEmpty ||
+        _city.text.trim().isNotEmpty ||
+        _state.text.trim().isNotEmpty ||
+        _postalCode.text.trim().isNotEmpty) {
+      final addressError = Validators.validateAddress(
+        _address1.text.trim(),
+        _city.text.trim(),
+        _state.text.trim(),
+        _postalCode.text.trim(),
+      );
+      if (addressError != null) {
+        _showSnack(addressError);
+        return;
+      }
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSaveCustomer(
+        widget.customer.copyWith(
+          name: _name.text.trim().isEmpty
+              ? widget.customer.name
+              : _name.text.trim(),
+          email: _email.text.trim().toLowerCase(),
+          phone: _phone.text.trim(),
+          addressLine1: _address1.text.trim(),
+          addressLine2: _address2.text.trim(),
+          city: _city.text.trim(),
+          county: _county.text.trim(),
+          state: _state.text.trim(),
+          postalCode: _postalCode.text.trim(),
+          country: _country.text.trim().isEmpty
+              ? 'US'
+              : _country.text.trim().toUpperCase(),
+          acceptsMarketing: _acceptsMarketing,
+        ),
+      );
+      _showSnack('Profile saved.');
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
 class _CustomerOrdersPanel extends StatelessWidget {
   const _CustomerOrdersPanel({
     required this.orders,
     required this.storeInfo,
     required this.onBack,
+    required this.onRequestReturn,
   });
 
   final List<Order> orders;
   final StoreInfo storeInfo;
   final VoidCallback onBack;
+  final AsyncValueChanged<Order> onRequestReturn;
 
   @override
   Widget build(BuildContext context) {
@@ -2089,7 +2367,9 @@ class _CustomerOrdersPanel extends StatelessWidget {
                 for (final order in orders)
                   _CustomerOrderTile(
                     order: order,
+                    storeInfo: storeInfo,
                     onOpenInvoice: () => _openInvoice(context, order),
+                    onRequestReturn: () => _openReturnRequest(context, order),
                   ),
               ],
             ),
@@ -2122,6 +2402,14 @@ class _CustomerOrdersPanel extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  void _openReturnRequest(BuildContext context, Order order) {
+    showDialog<void>(
+      context: context,
+      builder: (context) =>
+          _ReturnRequestDialog(order: order, onSubmit: onRequestReturn),
     );
   }
 }
@@ -2380,10 +2668,17 @@ class _CustomerReferralsPanel extends StatelessWidget {
 }
 
 class _CustomerOrderTile extends StatelessWidget {
-  const _CustomerOrderTile({required this.order, required this.onOpenInvoice});
+  const _CustomerOrderTile({
+    required this.order,
+    required this.storeInfo,
+    required this.onOpenInvoice,
+    required this.onRequestReturn,
+  });
 
   final Order order;
+  final StoreInfo storeInfo;
   final VoidCallback onOpenInvoice;
+  final VoidCallback onRequestReturn;
 
   @override
   Widget build(BuildContext context) {
@@ -2447,6 +2742,36 @@ class _CustomerOrderTile extends StatelessWidget {
                   ].join(' • '),
           ),
         ),
+        ListTile(
+          contentPadding: const EdgeInsets.only(left: 16, right: 8),
+          leading: const Icon(Icons.assignment_return_outlined),
+          title: Text(_returnActionTitle(order)),
+          subtitle: Text(_returnActionSubtitle(order)),
+          trailing:
+              order.returnStatus == 'No return' ||
+                  order.returnStatus == 'Return rejected'
+              ? const Icon(Icons.chevron_right)
+              : null,
+          onTap:
+              order.returnStatus == 'No return' ||
+                  order.returnStatus == 'Return rejected'
+              ? onRequestReturn
+              : null,
+        ),
+        if ((order.returnStatus == 'Return approved' ||
+                order.returnStatus == 'Awaiting return item') &&
+            order.rmaNumber.trim().isNotEmpty)
+          ListTile(
+            contentPadding: const EdgeInsets.only(left: 16, right: 8),
+            leading: const Icon(Icons.print_outlined),
+            title: const Text('Print RMA and return label'),
+            subtitle: Text(order.rmaNumber),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => printHtmlDocument(
+              'RMA ${order.rmaNumber}',
+              _rmaHtml(order, storeInfo),
+            ),
+          ),
         if (order.lines.isNotEmpty)
           for (final line in order.lines)
             ListTile(
@@ -2463,6 +2788,153 @@ class _CustomerOrderTile extends StatelessWidget {
             ),
       ],
     );
+  }
+}
+
+String _returnActionTitle(Order order) {
+  return switch (order.returnStatus) {
+    'Return requested' => 'Return request pending',
+    'Return approved' => 'Return approved',
+    'Awaiting return item' => 'Return approved - send item back',
+    'Returned' => 'Return received',
+    'Return rejected' => 'Return denied - request again',
+    _ => 'Request return/refund',
+  };
+}
+
+String _returnActionSubtitle(Order order) {
+  if (order.returnAdminComment.trim().isNotEmpty) {
+    return order.returnAdminComment;
+  }
+  if (order.returnReason.trim().isNotEmpty) {
+    return order.returnReason;
+  }
+  return 'Select items and tell us why you want to return them.';
+}
+
+class _ReturnRequestDialog extends StatefulWidget {
+  const _ReturnRequestDialog({required this.order, required this.onSubmit});
+
+  final Order order;
+  final AsyncValueChanged<Order> onSubmit;
+
+  @override
+  State<_ReturnRequestDialog> createState() => _ReturnRequestDialogState();
+}
+
+class _ReturnRequestDialogState extends State<_ReturnRequestDialog> {
+  late final Set<String> _selectedSkus = {
+    for (final line in widget.order.lines) line.sku,
+  };
+  final _reason = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Request return for ${widget.order.id}'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.order.lines.isEmpty)
+                const Text('This order does not have item details available.')
+              else
+                for (final line in widget.order.lines)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _selectedSkus.contains(line.sku),
+                    onChanged: (value) {
+                      setState(() {
+                        if (value == true) {
+                          _selectedSkus.add(line.sku);
+                        } else {
+                          _selectedSkus.remove(line.sku);
+                        }
+                      });
+                    },
+                    title: Text(line.product.name),
+                    subtitle: Text(
+                      '${line.quantity} item(s) • ${line.size} • ${currency(line.total)}',
+                    ),
+                  ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _reason,
+                decoration: const InputDecoration(
+                  labelText: 'Reason for return/refund request',
+                ),
+                minLines: 3,
+                maxLines: 5,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: Text(_submitting ? 'Submitting' : 'Submit request'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit() async {
+    final reason = _reason.text.trim();
+    if (_selectedSkus.isEmpty) {
+      _snack('Select at least one item to return.');
+      return;
+    }
+    if (reason.length < 8) {
+      _snack('Add a short comment explaining the return.');
+      return;
+    }
+    setState(() => _submitting = true);
+    final requestItems = widget.order.lines
+        .where((line) => _selectedSkus.contains(line.sku))
+        .map(ReturnRequestItem.fromLine)
+        .toList();
+    final requested = widget.order
+      ..returnStatus = 'Return requested'
+      ..returnReason = reason
+      ..returnItems = requestItems
+      ..returnAdminComment = ''
+      ..rmaNumber = ''
+      ..rmaCreatedAt = null
+      ..returnRequestedAt = DateTime.now()
+      ..returnDecisionAt = null
+      ..returnRestocked = false
+      ..returnedAt = null;
+    try {
+      await widget.onSubmit(requested);
+      if (mounted) {
+        Navigator.of(context).pop();
+        _snack('Return request submitted.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 

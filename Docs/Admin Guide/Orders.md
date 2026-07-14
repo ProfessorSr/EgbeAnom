@@ -17,6 +17,7 @@ Use this every day to process orders.
 - Sent or Shipped means the package has been sent.
 - Delivered means the customer received it.
 - Cancelled means the order should not be fulfilled.
+- Awaiting return item means a return was approved and the store is waiting for the item to come back.
 
 ## Normal Order Flow
 
@@ -28,8 +29,18 @@ Use this every day to process orders.
 ## Filters
 
 - Shipping type filter should show standard, priority, priority one day, ground, and all.
-- Order status filter should show pending, processing, invoice created, label created, sent, delivered, cancelled, and all.
+- Order status filter should show pending, processing, invoice created, label created, awaiting return item, sent, delivered, cancelled, and all.
 - Financial status filter helps you avoid shipping unpaid orders.
+
+## Returns And Refunds
+
+- Customers can request a return or refund from their order page.
+- The admin can approve or deny the request and add a reason and comment.
+- If approved, the system creates an RMA and emails it to the customer.
+- The order moves to Awaiting return item.
+- After the item is received, the admin records the item condition and chooses the refund amount.
+- Refund choices are product plus shipping, just product, just shipping, or a specific dollar amount.
+- Approved refunds are sent through Stripe and saved back on the order.
 
 ## Batch Printing
 

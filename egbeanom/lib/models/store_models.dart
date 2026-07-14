@@ -331,6 +331,7 @@ class SiteStatus {
     this.showLatestFragranceNews = true,
     this.showCommunity = true,
     this.showCompanyReviews = true,
+    this.showMailingListSignup = true,
     this.homeShelfMode = 'Best sellers',
     List<int>? featuredProductIds,
   }) : featuredProductIds = featuredProductIds ?? [];
@@ -347,6 +348,7 @@ class SiteStatus {
   bool showLatestFragranceNews;
   bool showCommunity;
   bool showCompanyReviews;
+  bool showMailingListSignup;
   String homeShelfMode;
   List<int> featuredProductIds;
 
@@ -378,6 +380,7 @@ class SiteStatus {
         showLatestFragranceNews: value['show_latest_fragrance_news'] != false,
         showCommunity: value['show_community'] != false,
         showCompanyReviews: value['show_company_reviews'] != false,
+        showMailingListSignup: value['show_mailing_list_signup'] != false,
         homeShelfMode: _asString(
           value['home_shelf_mode'],
           fallback: 'Best sellers',
@@ -408,6 +411,7 @@ class SiteStatus {
     'show_latest_fragrance_news': showLatestFragranceNews,
     'show_community': showCommunity,
     'show_company_reviews': showCompanyReviews,
+    'show_mailing_list_signup': showMailingListSignup,
     'home_shelf_mode': homeShelfMode,
     'featured_product_ids': featuredProductIds,
   };
@@ -792,6 +796,15 @@ class Order {
     this.refundedAt,
     this.returnStatus = 'No return',
     this.returnReason = '',
+    this.returnItems = const [],
+    this.returnAdminComment = '',
+    this.returnCondition = '',
+    this.refundOption = '',
+    this.stripeRefundId = '',
+    this.rmaNumber = '',
+    this.rmaCreatedAt,
+    this.returnRequestedAt,
+    this.returnDecisionAt,
     this.returnRestocked = false,
     this.returnedAt,
     ShippingAddress? shippingAddress,
@@ -829,6 +842,15 @@ class Order {
   DateTime? refundedAt;
   String returnStatus;
   String returnReason;
+  List<ReturnRequestItem> returnItems;
+  String returnAdminComment;
+  String returnCondition;
+  String refundOption;
+  String stripeRefundId;
+  String rmaNumber;
+  DateTime? rmaCreatedAt;
+  DateTime? returnRequestedAt;
+  DateTime? returnDecisionAt;
   bool returnRestocked;
   DateTime? returnedAt;
   ShippingAddress shippingAddress;
@@ -879,6 +901,17 @@ class Order {
         }
       }
     }
+    final returnItems = <ReturnRequestItem>[];
+    final returnRows = row['return_items'];
+    if (returnRows is List) {
+      for (final returnRow in returnRows) {
+        if (returnRow is Map) {
+          returnItems.add(
+            ReturnRequestItem.fromRow(returnRow.cast<String, dynamic>()),
+          );
+        }
+      }
+    }
     return Order(
       id: _asString(row['order_number'], fallback: _asString(row['id'])),
       customer: _asString(row['customer_name']),
@@ -917,6 +950,17 @@ class Order {
       refundedAt: DateTime.tryParse(_asString(row['refunded_at'])),
       returnStatus: _asString(row['return_status'], fallback: 'No return'),
       returnReason: _asString(row['return_reason']),
+      returnItems: returnItems,
+      returnAdminComment: _asString(row['return_admin_comment']),
+      returnCondition: _asString(row['return_condition']),
+      refundOption: _asString(row['refund_option']),
+      stripeRefundId: _asString(row['stripe_refund_id']),
+      rmaNumber: _asString(row['rma_number']),
+      rmaCreatedAt: DateTime.tryParse(_asString(row['rma_created_at'])),
+      returnRequestedAt: DateTime.tryParse(
+        _asString(row['return_requested_at']),
+      ),
+      returnDecisionAt: DateTime.tryParse(_asString(row['return_decision_at'])),
       returnRestocked: row['return_restocked'] == true,
       returnedAt: DateTime.tryParse(_asString(row['returned_at'])),
       shippingAddress: ShippingAddress.fromJson(row['shipping_address']),
@@ -924,6 +968,52 @@ class Order {
       lines: parsedLines,
     );
   }
+}
+
+class ReturnRequestItem {
+  const ReturnRequestItem({
+    required this.sku,
+    required this.productName,
+    required this.size,
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  final String sku;
+  final String productName;
+  final String size;
+  final int quantity;
+  final double unitPrice;
+
+  double get total => quantity * unitPrice;
+
+  factory ReturnRequestItem.fromLine(CartLine line) {
+    return ReturnRequestItem(
+      sku: line.sku,
+      productName: line.product.name,
+      size: line.size,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+    );
+  }
+
+  factory ReturnRequestItem.fromRow(Map<String, dynamic> row) {
+    return ReturnRequestItem(
+      sku: _asString(row['sku']),
+      productName: _asString(row['product_name'], fallback: 'Return item'),
+      size: _asString(row['size']),
+      quantity: _asInt(row['quantity'], fallback: 1),
+      unitPrice: _asDouble(row['unit_price']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'sku': sku,
+    'product_name': productName,
+    'size': size,
+    'quantity': quantity,
+    'unit_price': unitPrice,
+  };
 }
 
 class ShippingOption {
@@ -1044,6 +1134,57 @@ class EmailServerSettings {
   };
 }
 
+class EmailMessage {
+  EmailMessage({
+    required this.id,
+    required this.messageId,
+    required this.mailbox,
+    required this.fromEmail,
+    required this.fromName,
+    required this.toEmail,
+    required this.subject,
+    required this.preview,
+    required this.textBody,
+    required this.htmlBody,
+    required this.receivedAt,
+    this.isRead = false,
+    this.orderNumber = '',
+  });
+
+  final String id;
+  final String messageId;
+  final String mailbox;
+  final String fromEmail;
+  final String fromName;
+  final String toEmail;
+  final String subject;
+  final String preview;
+  final String textBody;
+  final String htmlBody;
+  final DateTime receivedAt;
+  bool isRead;
+  final String orderNumber;
+
+  factory EmailMessage.fromRow(Map<String, dynamic> row) {
+    return EmailMessage(
+      id: _asString(row['id']),
+      messageId: _asString(row['message_id']),
+      mailbox: _asString(row['mailbox'], fallback: 'INBOX'),
+      fromEmail: _asString(row['from_email']),
+      fromName: _asString(row['from_name']),
+      toEmail: _asString(row['to_email']),
+      subject: _asString(row['subject'], fallback: '(No subject)'),
+      preview: _asString(row['preview']),
+      textBody: _asString(row['text_body']),
+      htmlBody: _asString(row['html_body']),
+      receivedAt:
+          DateTime.tryParse(_asString(row['received_at'])) ?? DateTime.now(),
+      isRead: row['is_read'] == true,
+      orderNumber: _asString(row['order_number']),
+    );
+  }
+}
+
 class CustomerAccount {
   CustomerAccount({
     required this.id,
@@ -1057,10 +1198,13 @@ class CustomerAccount {
     this.referralCredits = 0,
     this.loyaltyPoints = 0,
     this.referredBy = '',
+    this.acceptsMarketing = false,
     this.isNew = false,
     this.isBlocked = false,
     this.createdIp = '',
     this.lastLoginIp = '',
+    this.createdSource = '',
+    this.lastLoginSource = '',
     this.blockedReason = '',
     this.addressLine1 = '',
     this.addressLine2 = '',
@@ -1069,13 +1213,14 @@ class CustomerAccount {
     this.state = '',
     this.postalCode = '',
     this.country = 'US',
+    this.phone = '',
     this.createdAt,
     this.lastLoginAt,
   });
 
   final String id;
-  final String name;
-  final String email;
+  String name;
+  String email;
   final int joinedDaysAgo;
   int orders;
   double lifetimeValue;
@@ -1084,10 +1229,13 @@ class CustomerAccount {
   double referralCredits;
   int loyaltyPoints;
   String referredBy;
+  bool acceptsMarketing;
   final bool isNew;
   bool isBlocked;
   String createdIp;
   String lastLoginIp;
+  String createdSource;
+  String lastLoginSource;
   String blockedReason;
   String addressLine1;
   String addressLine2;
@@ -1096,6 +1244,7 @@ class CustomerAccount {
   String state;
   String postalCode;
   String country;
+  String phone;
   DateTime? createdAt;
   DateTime? lastLoginAt;
 
@@ -1122,9 +1271,12 @@ class CustomerAccount {
       referralCredits: _asDouble(row['referral_credits']),
       loyaltyPoints: _asInt(row['loyalty_points']),
       referredBy: _asString(row['referred_by']),
+      acceptsMarketing: row['accepts_marketing'] == true,
       isBlocked: row['is_blocked'] == true,
       createdIp: _asString(row['created_ip']),
       lastLoginIp: _asString(row['last_login_ip']),
+      createdSource: _asString(row['created_source']),
+      lastLoginSource: _asString(row['last_login_source']),
       blockedReason: _asString(row['blocked_reason']),
       addressLine1: _asString(row['address_line1']),
       addressLine2: _asString(row['address_line2']),
@@ -1133,8 +1285,56 @@ class CustomerAccount {
       state: _asString(row['state']),
       postalCode: _asString(row['postal_code']),
       country: _asString(row['country'], fallback: 'US'),
+      phone: _asString(row['phone']),
       createdAt: DateTime.tryParse(_asString(row['created_at'])),
       lastLoginAt: DateTime.tryParse(_asString(row['last_login_at'])),
+    );
+  }
+
+  CustomerAccount copyWith({
+    String? name,
+    String? email,
+    String? phone,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? county,
+    String? state,
+    String? postalCode,
+    String? country,
+    double? referralCredits,
+    bool? acceptsMarketing,
+  }) {
+    return CustomerAccount(
+      id: id,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      joinedDaysAgo: joinedDaysAgo,
+      orders: orders,
+      lifetimeValue: lifetimeValue,
+      segment: segment,
+      referralCode: referralCode,
+      referralCredits: referralCredits ?? this.referralCredits,
+      loyaltyPoints: loyaltyPoints,
+      referredBy: referredBy,
+      acceptsMarketing: acceptsMarketing ?? this.acceptsMarketing,
+      isNew: isNew,
+      isBlocked: isBlocked,
+      createdIp: createdIp,
+      lastLoginIp: lastLoginIp,
+      createdSource: createdSource,
+      lastLoginSource: lastLoginSource,
+      blockedReason: blockedReason,
+      addressLine1: addressLine1 ?? this.addressLine1,
+      addressLine2: addressLine2 ?? this.addressLine2,
+      city: city ?? this.city,
+      county: county ?? this.county,
+      state: state ?? this.state,
+      postalCode: postalCode ?? this.postalCode,
+      country: country ?? this.country,
+      phone: phone ?? this.phone,
+      createdAt: createdAt,
+      lastLoginAt: lastLoginAt,
     );
   }
 
@@ -1150,9 +1350,13 @@ class CustomerAccount {
     'referral_credits': referralCredits,
     'loyalty_points': loyaltyPoints,
     'referred_by': referredBy,
+    'accepts_marketing': acceptsMarketing,
     'is_blocked': isBlocked,
     'created_ip': createdIp,
     'last_login_ip': lastLoginIp,
+    'created_source': createdSource,
+    'last_login_source': lastLoginSource,
+    'last_login_at': lastLoginAt?.toUtc().toIso8601String(),
     'blocked_reason': blockedReason,
     'address_line1': addressLine1,
     'address_line2': addressLine2,
@@ -1161,6 +1365,44 @@ class CustomerAccount {
     'state': state,
     'postal_code': postalCode,
     'country': country,
+    'phone': phone,
+  };
+}
+
+class MailingListSubscriber {
+  MailingListSubscriber({
+    required this.email,
+    this.name = '',
+    this.source = 'Storefront',
+    this.isActive = true,
+    this.subscribedAt,
+    this.updatedAt,
+  });
+
+  final String email;
+  String name;
+  String source;
+  bool isActive;
+  DateTime? subscribedAt;
+  DateTime? updatedAt;
+
+  factory MailingListSubscriber.fromRow(Map<String, dynamic> row) {
+    return MailingListSubscriber(
+      email: _asString(row['email']).trim().toLowerCase(),
+      name: _asString(row['name']),
+      source: _asString(row['source'], fallback: 'Storefront'),
+      isActive: row['is_active'] != false,
+      subscribedAt: DateTime.tryParse(_asString(row['subscribed_at'])),
+      updatedAt: DateTime.tryParse(_asString(row['updated_at'])),
+    );
+  }
+
+  Map<String, dynamic> toRow() => {
+    'email': email.trim().toLowerCase(),
+    'name': name,
+    'source': source,
+    'is_active': isActive,
+    'updated_at': DateTime.now().toUtc().toIso8601String(),
   };
 }
 

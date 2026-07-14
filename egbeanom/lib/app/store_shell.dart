@@ -11,6 +11,8 @@ class _StoreShellState extends State<StoreShell> {
   final StoreDataGateway _gateway = const StoreDataGateway();
   StoreView _view = StoreView.shop;
   StreamSubscription<String>? _browserRouteSubscription;
+  Timer? _adminNotificationPollTimer;
+  bool _pollingAdminAttention = false;
   String _lastBrowserRoute = '/';
   bool _accountStartsCreating = false;
   String _filter = 'All';
@@ -33,6 +35,7 @@ class _StoreShellState extends State<StoreShell> {
   late final DateTime _visitorStartedAt = DateTime.now();
   final List<ActiveUserSession> _activeUserSessions = [];
   final List<AnalyticsEvent> _analyticsEvents = [];
+  AdminSection _adminInitialSection = AdminSection.overview;
 
   final List<Fragrance> _products = [];
 
@@ -76,6 +79,8 @@ class _StoreShellState extends State<StoreShell> {
     'DHL': const ShippingCarrierCredentials(),
   };
   final List<BackendUser> _backendUsers = [];
+  final List<MailingListSubscriber> _mailingListSubscribers = [];
+  final List<EmailMessage> _emailMessages = [];
   final List<StoreNotification> _notifications = [];
   bool _adminPreviewMode = false;
   bool _refreshingShippingRate = false;
@@ -102,6 +107,7 @@ class _StoreShellState extends State<StoreShell> {
   @override
   void dispose() {
     _browserRouteSubscription?.cancel();
+    _adminNotificationPollTimer?.cancel();
     super.dispose();
   }
 
@@ -199,6 +205,7 @@ class _StoreShellState extends State<StoreShell> {
       final customerRow = await _gateway.restoreCustomerSession();
       if (customerRow != null) {
         customer = CustomerAccount.fromRow(customerRow);
+        customer = await _captureCustomerAccessMetadata(customer);
       }
       final backendRow = await _gateway.restoreBackendSession();
       if (backendRow != null) {
@@ -220,6 +227,9 @@ class _StoreShellState extends State<StoreShell> {
     if (customer != null || backendUser != null) {
       await _loadStoreData();
     }
+    if (backendUser != null) {
+      _startAdminAttentionPolling();
+    }
     if (customer != null) {
       await _loadWishlistForCustomer(customer);
     }
@@ -230,11 +240,8 @@ class _StoreShellState extends State<StoreShell> {
       try {
         return await load();
       } catch (error, stackTrace) {
-        // Track error but allow graceful fallback
-        ErrorTracker().captureException(
-          error,
-          stackTrace: stackTrace,
-          contexts: {'operation': 'store_data_load', 'data_type': T.toString()},
+        debugPrint(
+          'Store data load failed for ${T.toString()}: $error\n$stackTrace',
         );
         return value;
       }
@@ -324,6 +331,14 @@ class _StoreShellState extends State<StoreShell> {
     );
     final customers = await fallback<List<Map<String, dynamic>>>(
       _gateway.fetchCustomerAccounts,
+      [],
+    );
+    final mailingListSubscribers = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchMailingListSubscribers,
+      [],
+    );
+    final emailMessages = await fallback<List<Map<String, dynamic>>>(
+      _gateway.fetchEmailMessages,
       [],
     );
     final siteStatus = await fallback<Map<String, dynamic>?>(
@@ -474,6 +489,16 @@ class _StoreShellState extends State<StoreShell> {
           ..clear()
           ..addAll(customers.map(CustomerAccount.fromRow));
       }
+      if (mailingListSubscribers.isNotEmpty) {
+        _mailingListSubscribers
+          ..clear()
+          ..addAll(mailingListSubscribers.map(MailingListSubscriber.fromRow));
+      }
+      if (emailMessages.isNotEmpty) {
+        _emailMessages
+          ..clear()
+          ..addAll(emailMessages.map(EmailMessage.fromRow));
+      }
       if (reviews.isNotEmpty) {
         final loadedReviews = reviews.map(ReviewSummary.fromRow).toList();
         _productReviews
@@ -536,6 +561,7 @@ class _StoreShellState extends State<StoreShell> {
           ..showLatestFragranceNews = status.showLatestFragranceNews
           ..showCommunity = status.showCommunity
           ..showCompanyReviews = status.showCompanyReviews
+          ..showMailingListSignup = status.showMailingListSignup
           ..homeShelfMode = status.homeShelfMode
           ..featuredProductIds = List.of(status.featuredProductIds)
           ..returnPolicy = status.returnPolicy
@@ -1004,10 +1030,11 @@ class _StoreShellState extends State<StoreShell> {
   }) {
     final now = DateTime.now();
     final label = '${now.month}/${now.day}';
+    final dayKey = _analyticsDayKey(now);
     unawaited(
       _gateway
           .incrementDailyMetric({
-            'day': _analyticsDayKey(now),
+            'day': dayKey,
             'label': label,
             'new_users': newUsers,
             'visits': visits,
@@ -1016,7 +1043,9 @@ class _StoreShellState extends State<StoreShell> {
           })
           .catchError((_) {}),
     );
-    final index = _dailyMetrics.indexWhere((metric) => metric.day == label);
+    final index = _dailyMetrics.indexWhere(
+      (metric) => metric.day == label || metric.day == dayKey,
+    );
     if (index == -1) {
       _dailyMetrics.add(
         DailyMetric(
@@ -1462,6 +1491,7 @@ class _StoreShellState extends State<StoreShell> {
       return;
     }
     _checkoutEmail = customer.email;
+    _checkoutPhone = customer.phone;
     _checkoutShippingAddress = ShippingAddress(
       firstName: customer.name.split(' ').first,
       lastName: customer.name.split(' ').skip(1).join(' '),
@@ -1472,7 +1502,7 @@ class _StoreShellState extends State<StoreShell> {
       state: customer.state,
       postalCode: customer.postalCode,
       country: customer.country,
-      phone: _checkoutPhone,
+      phone: customer.phone,
       email: customer.email,
     );
   }
@@ -1701,6 +1731,7 @@ class _StoreShellState extends State<StoreShell> {
     try {
       await _gateway.upsertOrder(_orderRow(order));
       await _gateway.insertOrderItems(_orderItemRows(order));
+      _recordOrderReceivedNotification(order);
     } catch (error) {
       if (mounted) {
         setState(() => _placingOrder = false);
@@ -1759,6 +1790,7 @@ class _StoreShellState extends State<StoreShell> {
         _orders.insert(0, order);
       }
     });
+    _recordOrderReceivedNotification(order);
     _recordAnalyticsEvent(
       'add_payment_info',
       page: StoreView.checkout.name,
@@ -1772,6 +1804,24 @@ class _StoreShellState extends State<StoreShell> {
 
     _showStatusSnack('Redirecting to secure payment for order $orderId...');
     _gateway.redirectBrowserTo(redirectUrl);
+  }
+
+  void _recordOrderReceivedNotification(Order order) {
+    final notificationId = 'N-order-received-${order.id}';
+    if (_notifications.any(
+      (notification) => notification.id == notificationId,
+    )) {
+      return;
+    }
+    final notification = StoreNotification(
+      id: notificationId,
+      type: 'order',
+      title: 'New order received',
+      message:
+          '${order.id} was created for ${order.customer} and is waiting for payment.',
+      createdAt: DateTime.now(),
+    );
+    _addAdminNotification(notification, persist: true, urgent: true);
   }
 
   String _newCheckoutToken() {
@@ -2305,6 +2355,11 @@ class _StoreShellState extends State<StoreShell> {
       postalCode: shippingAddress?.postalCode ?? '',
       country: shippingAddress?.country ?? 'US',
     );
+    await _captureCustomerAccessMetadata(
+      created,
+      isNewAccount: true,
+      persist: false,
+    );
 
     CustomerAccount account = created;
     try {
@@ -2418,6 +2473,7 @@ class _StoreShellState extends State<StoreShell> {
       final row = await _gateway.loginCustomer(cleanEmail, password);
       if (row != null) {
         match = CustomerAccount.fromRow(row);
+        match = await _captureCustomerAccessMetadata(match);
       }
     } catch (error) {
       if (mounted) {
@@ -2459,6 +2515,38 @@ class _StoreShellState extends State<StoreShell> {
     } catch (_) {
       // Wishlist should never block sign-in or checkout.
     }
+  }
+
+  Future<CustomerAccount> _captureCustomerAccessMetadata(
+    CustomerAccount customer, {
+    bool isNewAccount = false,
+    bool persist = true,
+  }) async {
+    final sourceType = currentClientSourceType();
+    final ipAddress = await currentClientIpAddress();
+    final now = DateTime.now();
+    customer
+      ..lastLoginAt = now
+      ..lastLoginSource = sourceType;
+    if (ipAddress.isNotEmpty) {
+      customer.lastLoginIp = ipAddress;
+    }
+    if (isNewAccount) {
+      if (customer.createdSource.trim().isEmpty) {
+        customer.createdSource = sourceType;
+      }
+      if (ipAddress.isNotEmpty && customer.createdIp.trim().isEmpty) {
+        customer.createdIp = ipAddress;
+      }
+    }
+    if (persist) {
+      try {
+        await _gateway.upsertCustomer(customer.toRow());
+      } catch (_) {
+        // Access metadata is helpful, but it should never block sign-in.
+      }
+    }
+    return customer;
   }
 
   Future<void> _saveWishlistForCustomer(CustomerAccount customer) async {
@@ -2515,18 +2603,26 @@ class _StoreShellState extends State<StoreShell> {
       _currentBackendUser = match;
       if (match == null) {
         _adminLoginError = 'Email or password was not recognized.';
+        _adminNotificationPollTimer?.cancel();
         return;
       }
       _adminPreviewMode = true;
       _view = StoreView.admin;
     });
     if (match != null) {
-      unawaited(_loadStoreData());
+      unawaited(
+        _loadStoreData().then((_) {
+          if (_currentBackendUser != null) {
+            _startAdminAttentionPolling();
+          }
+        }),
+      );
     }
   }
 
   void _logoutBackendUser() {
     unawaited(_gateway.logoutBackendUser());
+    _adminNotificationPollTimer?.cancel();
     setState(() {
       _currentBackendUser = null;
       _adminPreviewMode = false;
@@ -2607,6 +2703,10 @@ class _StoreShellState extends State<StoreShell> {
   Future<void> _upsertProduct(Fragrance product) async {
     try {
       await _gateway.upsertProduct(_productRow(product));
+      await _gateway.replaceProductImages(
+        product.id,
+        _productImageRows(product),
+      );
       await _gateway.replaceProductVariants(
         product.id,
         product.variants
@@ -2634,6 +2734,19 @@ class _StoreShellState extends State<StoreShell> {
       summary: 'Product saved: ${product.name}',
       metadata: {'sku': product.sku, 'stock': product.stock},
     );
+  }
+
+  List<Map<String, dynamic>> _productImageRows(Fragrance product) {
+    return [
+      for (var i = 0; i < product.images.length; i++)
+        {
+          'product_id': product.id,
+          'url': product.images[i].url,
+          'alt_text': product.images[i].altText,
+          'sort_order': i + 1,
+          'is_primary': product.images[i].isPrimary,
+        },
+    ];
   }
 
   Future<void> _autoApproveProductNotes(Fragrance product) async {
@@ -2777,6 +2890,9 @@ class _StoreShellState extends State<StoreShell> {
     final previous = existingIndex == -1
         ? null
         : _orders[existingIndex].fulfillmentStatus;
+    final previousReturnStatus = existingIndex == -1
+        ? null
+        : _orders[existingIndex].returnStatus;
     setState(() {
       if (existingIndex != -1) {
         _orders[existingIndex] = order;
@@ -2801,6 +2917,13 @@ class _StoreShellState extends State<StoreShell> {
       if (event != null) {
         unawaited(_sendOrderEmail(order, event));
       }
+      final returnEvent = _emailEventForReturnChange(
+        previousReturnStatus,
+        order.returnStatus,
+      );
+      if (returnEvent != null) {
+        unawaited(_sendOrderEmail(order, returnEvent));
+      }
       _recordAdminAudit(
         action: 'update',
         entityType: 'order',
@@ -2815,6 +2938,79 @@ class _StoreShellState extends State<StoreShell> {
       _showStatusSnack('Order saved.');
     } catch (error) {
       _showStatusSnack('Order save failed: $error');
+    }
+  }
+
+  Future<void> _requestOrderReturn(Order order) async {
+    final index = _orders.indexWhere((item) => item.id == order.id);
+    final notification = StoreNotification(
+      id: 'N-return-${DateTime.now().millisecondsSinceEpoch}-${order.id}',
+      type: 'return',
+      title: 'Return request for ${order.id}',
+      message:
+          '${order.customer} requested return/refund for ${order.returnItems.length} item(s).\n${order.returnReason}',
+      createdAt: DateTime.now(),
+    );
+    setState(() {
+      if (index == -1) {
+        _orders.insert(0, order);
+      } else {
+        _orders[index] = order;
+      }
+      _notifications.insert(0, notification);
+    });
+    try {
+      await _gateway.submitReturnRequest(
+        orderNumber: order.id,
+        email: order.email,
+        reason: order.returnReason,
+        items: order.returnItems.map((item) => item.toJson()).toList(),
+      );
+      await _gateway.insertNotification(notification.toRow());
+      _recordAdminAudit(
+        action: 'return_request',
+        entityType: 'order',
+        entityId: order.id,
+        summary: 'Customer requested return/refund for ${order.id}',
+        metadata: {
+          'return_items': order.returnItems
+              .map((item) => item.toJson())
+              .toList(),
+          'return_reason': order.returnReason,
+        },
+      );
+    } catch (error) {
+      _showStatusSnack(
+        'Return request was saved on this order, but admin notification sync needs attention: $error',
+      );
+    }
+  }
+
+  Future<String> _createStripeRefund(
+    Order order,
+    double amount,
+    String reason,
+  ) async {
+    if (amount <= 0) {
+      throw StateError('Refund amount must be greater than 0.');
+    }
+    try {
+      final refundId = await _gateway.createStripeRefund(
+        orderNumber: order.id,
+        amount: amount,
+        reason: reason,
+      );
+      _recordAdminAudit(
+        action: 'stripe_refund',
+        entityType: 'order',
+        entityId: order.id,
+        summary: 'Stripe refund $refundId created for ${currency(amount)}',
+        metadata: {'refund_id': refundId, 'amount': amount, 'reason': reason},
+      );
+      return refundId;
+    } catch (error) {
+      _showStatusSnack('Stripe refund failed: $error');
+      rethrow;
     }
   }
 
@@ -2886,7 +3082,6 @@ class _StoreShellState extends State<StoreShell> {
             trackingNumber: trackingNumber,
           );
     return {
-      'id': order.id,
       'order_number': order.id,
       'customer_name': order.customer,
       'email': order.email,
@@ -2921,6 +3116,15 @@ class _StoreShellState extends State<StoreShell> {
       'refunded_at': order.refundedAt?.toUtc().toIso8601String(),
       'return_status': order.returnStatus,
       'return_reason': order.returnReason,
+      'return_items': order.returnItems.map((item) => item.toJson()).toList(),
+      'return_admin_comment': order.returnAdminComment,
+      'return_condition': order.returnCondition,
+      'refund_option': order.refundOption,
+      'stripe_refund_id': order.stripeRefundId,
+      'rma_number': order.rmaNumber,
+      'rma_created_at': order.rmaCreatedAt?.toUtc().toIso8601String(),
+      'return_requested_at': order.returnRequestedAt?.toUtc().toIso8601String(),
+      'return_decision_at': order.returnDecisionAt?.toUtc().toIso8601String(),
       'return_restocked': order.returnRestocked,
       'returned_at': order.returnedAt?.toUtc().toIso8601String(),
       'shipping_address': order.shippingAddress.toJson(),
@@ -2933,6 +3137,7 @@ class _StoreShellState extends State<StoreShell> {
       'pending' => 'pending',
       'paid' => 'paid',
       'invoice created' => 'invoice_created',
+      'awaiting return item' => 'awaiting_return_item',
       'packing' => 'packing',
       'picking' || 'being picked' => 'picking',
       'label printed' || 'label created' || 'label_created' => 'label_created',
@@ -2962,6 +3167,8 @@ class _StoreShellState extends State<StoreShell> {
       'pending' || 'unfulfilled' => 'Pending',
       'processing' => 'Processing',
       'invoice created' || 'invoice_created' => 'Invoice created',
+      'awaiting return item' ||
+      'awaiting_return_item' => 'Awaiting return item',
       'being picked' || 'picking' => 'Being picked',
       'packing' => 'Packing',
       'label printed' || 'label created' || 'label_created' => 'Label created',
@@ -3199,25 +3406,36 @@ class _StoreShellState extends State<StoreShell> {
 
   Future<void> _updateReview(ReviewSummary review, String status) async {
     final previousStatus = review.status;
-    final isDeleteAction = status == 'rejected';
-    setState(() {
-      review.status = status;
-      _notifications.insert(
-        0,
-        StoreNotification(
-          id: 'N-${DateTime.now().millisecondsSinceEpoch}',
-          type: 'review',
-          title: 'Review $status',
-          message: '${review.author} review marked $status.',
-          createdAt: DateTime.now(),
-        ),
-      );
-    });
+    final isDeleteAction = status == 'delete';
     try {
-      await _gateway.updateReviewStatus('${review.id}', status);
+      if (isDeleteAction) {
+        await _gateway.deleteReview('${review.id}');
+      } else {
+        await _gateway.updateReviewStatus('${review.id}', status);
+      }
       if (!mounted) {
         return;
       }
+      setState(() {
+        if (isDeleteAction) {
+          _productReviews.removeWhere((item) => item.id == review.id);
+          _companyReviews.removeWhere((item) => item.id == review.id);
+        } else {
+          review.status = status;
+        }
+        _notifications.insert(
+          0,
+          StoreNotification(
+            id: 'N-${DateTime.now().millisecondsSinceEpoch}',
+            type: 'review',
+            title: isDeleteAction ? 'Review deleted' : 'Review $status',
+            message: isDeleteAction
+                ? '${review.author} review was deleted.'
+                : '${review.author} review marked $status.',
+            createdAt: DateTime.now(),
+          ),
+        );
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -3252,6 +3470,34 @@ class _StoreShellState extends State<StoreShell> {
     unawaited(_sendManualCustomerEmail(audience, subject, body));
   }
 
+  Future<void> _syncInboundEmail() async {
+    try {
+      final result = await _gateway.syncInboundEmail();
+      final rows = await _gateway.fetchEmailMessages();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _emailMessages
+          ..clear()
+          ..addAll(rows.map(EmailMessage.fromRow));
+      });
+      final imported = result['imported'] ?? result['synced'] ?? 0;
+      _showStatusSnack('Inbox synced. $imported new message(s).');
+    } catch (error) {
+      _showStatusSnack('Inbox sync failed: $error');
+    }
+  }
+
+  void _markEmailMessageRead(EmailMessage message, bool isRead) {
+    setState(() => message.isRead = isRead);
+    unawaited(
+      _gateway
+          .updateEmailMessageReadStatus(message.id, isRead)
+          .catchError((_) {}),
+    );
+  }
+
   Future<void> _sendManualCustomerEmail(
     String audience,
     String subject,
@@ -3263,12 +3509,16 @@ class _StoreShellState extends State<StoreShell> {
       return;
     }
     try {
+      final htmlBody = _manualEmailHtml(
+        subject.trim().isEmpty ? 'EgbeAnom update' : subject.trim(),
+        body,
+      );
       await _gateway.sendEmail(
         kind: 'manual',
         recipients: recipients,
         subject: subject.trim().isEmpty ? 'EgbeAnom update' : subject.trim(),
-        htmlBody: body,
-        textBody: _plainTextFromHtml(body),
+        htmlBody: htmlBody,
+        textBody: _plainTextFromHtml(htmlBody),
       );
       _recordEmailNotification(
         title: 'Email sent',
@@ -3286,6 +3536,22 @@ class _StoreShellState extends State<StoreShell> {
 
   List<String> _emailRecipientsForAudience(String audience) {
     final cleanAudience = audience.trim().toLowerCase();
+    if (cleanAudience == 'non-account mailing list') {
+      return _nonAccountMailingListRecipients();
+    }
+    if (cleanAudience == 'account mailing list') {
+      return _accountMailingListRecipients();
+    }
+    if (cleanAudience == 'all mailing list' ||
+        cleanAudience == 'mailing list') {
+      return {
+        ..._accountMailingListRecipients(),
+        ..._nonAccountMailingListRecipients(),
+      }.toList();
+    }
+    if (Validators.validateEmail(cleanAudience) == null) {
+      return [cleanAudience];
+    }
     Iterable<CustomerAccount> matches;
     if (cleanAudience == 'all customers') {
       matches = _customers;
@@ -3305,6 +3571,67 @@ class _StoreShellState extends State<StoreShell> {
         .where((email) => email.isNotEmpty)
         .toSet()
         .toList();
+  }
+
+  List<String> _accountMailingListRecipients() {
+    return _customers
+        .where((customer) => customer.acceptsMarketing)
+        .map((customer) => customer.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  List<String> _nonAccountMailingListRecipients() {
+    final accountEmails = _customers
+        .map((customer) => customer.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty)
+        .toSet();
+    return _mailingListSubscribers
+        .where((subscriber) => subscriber.isActive)
+        .map((subscriber) => subscriber.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty && !accountEmails.contains(email))
+        .toSet()
+        .toList();
+  }
+
+  Future<void> _updateAccountMailingList(bool subscribed) async {
+    final customer = _currentCustomer;
+    if (customer == null) {
+      return;
+    }
+    await _upsertCustomer(customer.copyWith(acceptsMarketing: subscribed));
+  }
+
+  Future<void> _joinMailingList(String email) async {
+    final cleanEmail = email.trim().toLowerCase();
+    final emailError = Validators.validateEmail(cleanEmail);
+    if (emailError != null) {
+      _showStatusSnack(emailError);
+      throw StateError(emailError);
+    }
+    final subscriber = MailingListSubscriber(
+      email: cleanEmail,
+      source: currentClientSourceType(),
+      isActive: true,
+    );
+    try {
+      await _gateway.upsertMailingListSubscriber(subscriber.toRow());
+      setState(() {
+        final index = _mailingListSubscribers.indexWhere(
+          (item) => item.email == cleanEmail,
+        );
+        if (index == -1) {
+          _mailingListSubscribers.insert(0, subscriber);
+        } else {
+          _mailingListSubscribers[index] = subscriber;
+        }
+      });
+      _showStatusSnack('You are on the mailing list.');
+    } catch (error) {
+      _showStatusSnack('Mailing list signup failed: $error');
+      rethrow;
+    }
   }
 
   Future<void> _sendOrderEmail(Order order, String event) async {
@@ -3349,6 +3676,20 @@ class _StoreShellState extends State<StoreShell> {
     };
   }
 
+  String? _emailEventForReturnChange(String? previous, String current) {
+    final before = (previous ?? '').trim().toLowerCase();
+    final after = current.trim().toLowerCase();
+    if (before == after) {
+      return null;
+    }
+    return switch (after) {
+      'awaiting return item' => 'return_approved',
+      'return approved' => 'return_approved',
+      'return rejected' => 'return_denied',
+      _ => null,
+    };
+  }
+
   String _orderEmailSubject(Order order, String event) {
     return switch (event) {
       'payment_success' => 'Your EgbeAnom invoice for order ${order.id}',
@@ -3356,6 +3697,8 @@ class _StoreShellState extends State<StoreShell> {
       'processing' => 'Your EgbeAnom order is being prepared',
       'label_created' => 'Your EgbeAnom shipping label is ready',
       'sent' => 'Your EgbeAnom order is on the way',
+      'return_approved' => 'Your EgbeAnom return was approved',
+      'return_denied' => 'Your EgbeAnom return request update',
       _ => 'EgbeAnom order update ${order.id}',
     };
   }
@@ -3374,54 +3717,231 @@ class _StoreShellState extends State<StoreShell> {
       'label_created' =>
         'Your shipping label has been created. Tracking information is below.',
       'sent' => 'Your order has been marked as sent and is on the way.',
+      'return_approved' =>
+        'Your return request was approved. Your RMA number is ${htmlEscape.convert(order.rmaNumber)}. Print the RMA/return label from your account and include the RMA in your package.',
+      'return_denied' =>
+        'Your return request was reviewed and could not be approved. ${htmlEscape.convert(order.returnAdminComment)}',
       _ => 'Your order has been updated.',
     };
     final rows = order.lines.isEmpty
-        ? '<tr><td>EgbeAnom order</td><td>${order.itemCount}</td><td>${currency(order.total)}</td></tr>'
+        ? '<tr><td><strong>EgbeAnom order</strong><br><em>Fragrance order</em></td><td>${order.itemCount}</td><td>${currency(order.total)}</td></tr>'
         : order.lines
               .map(
                 (line) =>
-                    '<tr><td>${htmlEscape.convert(line.product.name)} ${htmlEscape.convert(line.size)}</td><td>${line.quantity}</td><td>${currency(line.total)}</td></tr>',
+                    '<tr><td><strong>${htmlEscape.convert(line.product.name)}</strong><br><em>${htmlEscape.convert(line.product.concentration)}</em><br><span>${htmlEscape.convert(line.sku)} • ${htmlEscape.convert(line.size)}</span></td><td>${line.quantity}</td><td>${currency(line.total)}</td></tr>',
               )
               .join();
     final tax = _orderTaxTotal(order);
-    return '''
-<html>
-  <body style="margin:0;padding:0;background:#f7f2e8;color:#121212;font-family:Arial,sans-serif;">
-    <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #b7892f;">
-      <div style="padding:28px 34px;border-bottom:3px solid #d3a13c;">
-        <h1 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-weight:400;font-size:34px;">EgbeAnom Fragrance</h1>
-        <p style="margin:8px 0 0;color:#333;">Where Elegance Speaks. Scents Last Forever.</p>
-      </div>
-      <div style="padding:28px 34px;">
-        <h2 style="margin:0 0 10px;color:#b8842b;text-transform:uppercase;">Order $escapedOrderId</h2>
-        <p style="font-size:16px;line-height:1.45;">$intro</p>
-        <table style="width:100%;border-collapse:collapse;margin-top:18px;">
+    final summaryRows = [
+      _emailSummaryRow('SUBTOTAL', currency(order.subtotal)),
+      if (order.discountTotal > 0)
+        _emailSummaryRow('DISCOUNT', '-${currency(order.discountTotal)}'),
+      _emailSummaryRow('SHIPPING', currency(order.shippingTotal)),
+      _emailSummaryRow('TAX', currency(tax)),
+      _emailSummaryRow('TOTAL', currency(order.total), grand: true),
+    ].join();
+    final trackingBlock = (event == 'label_created' || event == 'sent')
+        ? '<p class="email-note"><strong>Tracking:</strong> $tracking</p>'
+        : '';
+    final rmaBlock = event == 'return_approved'
+        ? '<p class="email-note"><strong>RMA:</strong> ${htmlEscape.convert(order.rmaNumber)}</p>'
+        : '';
+    return _egbeEmailShell(
+      title: 'Order $escapedOrderId',
+      preheader: intro,
+      bodyHtml:
+          '''
+        <p class="email-intro">$intro</p>
+        <table class="email-table">
           <thead>
-            <tr>
-              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Item</th>
-              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Qty</th>
-              <th style="border:1px solid #d8bd80;padding:10px;text-align:left;color:#7d5a1e;">Total</th>
-            </tr>
+            <tr><th>Item Description</th><th>Qty</th><th>Total</th></tr>
           </thead>
           <tbody>$rows</tbody>
         </table>
-        <div style="margin-top:18px;border:1px solid #d8bd80;padding:14px;">
-          <div><strong>Subtotal:</strong> ${currency(order.subtotal)}</div>
-          ${order.discountTotal > 0 ? '<div><strong>Discount:</strong> -${currency(order.discountTotal)}</div>' : ''}
-          <div><strong>Shipping:</strong> ${currency(order.shippingTotal)}</div>
-          <div><strong>Tax:</strong> ${currency(tax)}</div>
-          <div style="font-size:20px;margin-top:8px;"><strong>Total:</strong> ${currency(order.total)}</div>
-        </div>
-        ${(event == 'label_created' || event == 'sent') ? '<p style="margin-top:18px;"><strong>Tracking:</strong> $tracking</p>' : ''}
+        <table class="email-summary">$summaryRows</table>
+        $trackingBlock
+        $rmaBlock
+      ''',
+    );
+  }
+
+  String _manualEmailHtml(String subject, String body) {
+    return _egbeEmailShell(
+      title: htmlEscape.convert(subject),
+      preheader: _plainTextFromHtml(body),
+      bodyHtml: _manualEmailBodyContent(body),
+    );
+  }
+
+  String _manualEmailBodyContent(String body) {
+    final trimmed = body.trim();
+    final bodyMatch = RegExp(
+      r'<body[^>]*>([\s\S]*?)</body>',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (bodyMatch != null) {
+      return bodyMatch.group(1) ?? '';
+    }
+    final looksHtml = RegExp(
+      r'<[a-z][\s\S]*>',
+      caseSensitive: false,
+    ).hasMatch(trimmed);
+    if (looksHtml) {
+      return trimmed;
+    }
+    return '<p class="email-intro">${htmlEscape.convert(trimmed).replaceAll('\n', '<br>')}</p>';
+  }
+
+  String _emailSummaryRow(String label, String value, {bool grand = false}) {
+    return '<tr class="${grand ? 'grand' : ''}"><td>$label</td><td>$value</td></tr>';
+  }
+
+  String _egbeEmailShell({
+    required String title,
+    required String preheader,
+    required String bodyHtml,
+  }) {
+    final storeName = htmlEscape.convert(_storeInfo.displayName);
+    final logoUrl = htmlEscape.convert(_storeInfo.logoUrl.trim());
+    final logoHtml = logoUrl.isEmpty
+        ? ''
+        : '<td class="email-logo-cell"><img class="email-logo" src="$logoUrl" alt="$storeName logo"></td>';
+    final contact = [_storeInfo.email, _storeInfo.phone]
+        .where((item) => item.trim().isNotEmpty)
+        .map(htmlEscape.convert)
+        .join(' • ');
+    final address = _emailFooterAddress();
+    final unsubscribeEmail = _storeInfo.email.trim().isEmpty
+        ? 'support@egbeanom.com'
+        : _storeInfo.email.trim();
+    final unsubscribeHref =
+        'mailto:${Uri.encodeComponent(unsubscribeEmail)}'
+        '?subject=${Uri.encodeComponent('Unsubscribe from EgbeAnom emails')}';
+    final appOrigin = Uri.base.hasScheme && Uri.base.host.isNotEmpty
+        ? Uri.base.origin
+        : '';
+    final qrCodeUrl = appOrigin.isEmpty
+        ? 'assets/assets/images/egbeanom_qr_code.png'
+        : '$appOrigin/assets/assets/images/egbeanom_qr_code.png';
+    final safePreheader = htmlEscape.convert(preheader);
+    return '''
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { margin: 0; padding: 0; background: #f7f2e8; color: #121212; font-family: Arial, sans-serif; }
+      .preheader { display: none; max-height: 0; overflow: hidden; opacity: 0; color: transparent; }
+      .email-doc { max-width: 840px; margin: 0 auto; background: #fff; border: 1px solid #b7892f; }
+      .email-top { background: #fff; color: #121212; padding: 30px 38px 24px; border-bottom: 3px solid #d3a13c; }
+      .email-brand-table { width: 100%; border-collapse: collapse; }
+      .email-brand-table td { vertical-align: middle; padding: 0; }
+      .email-brand { font-family: Georgia, 'Times New Roman', serif; font-size: 42px; line-height: 1; font-weight: 400; margin: 0; }
+      .email-tagline { color: #333; font-family: Georgia, 'Times New Roman', serif; font-size: 17px; line-height: 1.35; margin: 10px 0 0; }
+      .email-logo-cell { width: 112px; text-align: right; padding-left: 18px !important; }
+      .email-logo { display: inline-block; width: 96px; max-width: 96px; height: auto; border: 0; }
+      .email-body { padding: 34px 42px; }
+      .email-title { color: #b8842b; text-transform: uppercase; letter-spacing: 1px; font-size: 22px; margin: 0 0 14px; }
+      .email-intro { font-size: 16px; line-height: 1.5; margin: 0 0 18px; }
+      .email-table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      .email-table th { background: transparent; color: #7d5a1e; border: 1px solid #d8bd80; padding: 12px; text-align: left; text-transform: uppercase; font-size: 13px; }
+      .email-table td { border: 1px solid #d8bd80; padding: 12px; vertical-align: top; font-size: 15px; }
+      .email-table em { font-family: Georgia, 'Times New Roman', serif; color: #333; }
+      .email-table span { color: #555; font-size: 12px; }
+      .email-summary { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      .email-summary td { border: 1px solid #d8bd80; padding: 12px 16px; font-size: 15px; }
+      .email-summary td:last-child { text-align: right; }
+      .email-summary .grand td { font-size: 20px; font-weight: 700; }
+      .email-note { border: 1px solid #d8bd80; padding: 12px 16px; margin: 18px 0 0; }
+      .email-footer { border-top: 1px solid #d8bd80; padding: 22px 42px 28px; font-size: 13px; color: #555; }
+      .email-footer-title { color: #b8842b; text-transform: uppercase; font-weight: 700; margin-bottom: 6px; }
+      .email-footer p { margin: 8px 0 0; line-height: 1.45; }
+      .email-footer a { color: #7d5a1e; font-weight: 700; }
+      .email-footer-small { font-size: 12px; color: #666; }
+      .email-footer-table { width: 100%; border-collapse: collapse; }
+      .email-footer-table td { vertical-align: bottom; padding: 0; }
+      .email-footer-qr-cell { width: 128px; text-align: right; padding-left: 24px !important; }
+      .email-footer-qr { width: 112px; max-width: 112px; height: auto; border: 1px solid #d8bd80; display: inline-block; }
+      @media only screen and (max-width: 620px) {
+        .email-doc { width: 100% !important; border-left: 0 !important; border-right: 0 !important; }
+        .email-top, .email-body, .email-footer { padding-left: 20px !important; padding-right: 20px !important; }
+        .email-brand { font-size: 32px !important; }
+        .email-logo-cell { width: 78px !important; padding-left: 10px !important; }
+        .email-logo { width: 68px !important; max-width: 68px !important; }
+        .email-footer-qr-cell { width: 76px !important; padding-left: 10px !important; }
+        .email-footer-qr { width: 64px !important; max-width: 64px !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preheader">$safePreheader</div>
+    <div class="email-doc">
+      <div class="email-top">
+        <table class="email-brand-table" role="presentation">
+          <tr>
+            <td>
+              <h1 class="email-brand">$storeName</h1>
+              <p class="email-tagline">Where Elegance Speaks.<br>Scents Last Forever.</p>
+            </td>
+            $logoHtml
+          </tr>
+        </table>
       </div>
-      <div style="padding:18px 34px;border-top:1px solid #d8bd80;color:#555;font-size:13px;">
-        Thank you for choosing EgbeAnom.
+      <div class="email-body">
+        <h2 class="email-title">$title</h2>
+        $bodyHtml
+      </div>
+      <div class="email-footer">
+        <table class="email-footer-table" role="presentation">
+          <tr>
+            <td>
+              <div class="email-footer-title">Customer Support</div>
+              ${contact.isEmpty ? 'Thank you for choosing EgbeAnom.' : contact}
+              ${address.isEmpty ? '' : '<p>$address</p>'}
+              <p>
+                You are receiving this email because you purchased from EgbeAnom,
+                created an account, requested an update, or joined our mailing list.
+              </p>
+              <p>
+                To stop receiving marketing emails, reply with "Unsubscribe" or email
+                <a href="$unsubscribeHref">$unsubscribeEmail</a>.
+              </p>
+              <p class="email-footer-small">
+                Order, payment, shipping, return, refund, account, and security emails
+                may still be sent when needed to service your account or purchase.
+              </p>
+              <p>Thank you for choosing EgbeAnom.</p>
+            </td>
+            <td class="email-footer-qr-cell">
+              <img class="email-footer-qr" src="$qrCodeUrl" alt="EgbeAnom website QR code">
+            </td>
+          </tr>
+        </table>
       </div>
     </div>
   </body>
 </html>
 ''';
+  }
+
+  String _emailFooterAddress() {
+    final parts =
+        [
+              _storeInfo.addressLine1,
+              _storeInfo.addressLine2,
+              [
+                _storeInfo.city,
+                _storeInfo.state,
+                _storeInfo.postalCode,
+              ].where((item) => item.trim().isNotEmpty).join(' '),
+              _storeInfo.country,
+            ]
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .map(htmlEscape.convert)
+            .toList();
+    return parts.isEmpty ? '' : parts.join('<br>');
   }
 
   String _plainTextFromHtml(String html) {
@@ -3537,6 +4057,7 @@ class _StoreShellState extends State<StoreShell> {
       showLatestFragranceNews: _siteStatus.showLatestFragranceNews,
       showCommunity: _siteStatus.showCommunity,
       showCompanyReviews: _siteStatus.showCompanyReviews,
+      showMailingListSignup: _siteStatus.showMailingListSignup,
       homeShelfMode: _siteStatus.homeShelfMode,
       featuredProductIds: List.of(_siteStatus.featuredProductIds),
       returnPolicy: _siteStatus.returnPolicy,
@@ -3554,6 +4075,7 @@ class _StoreShellState extends State<StoreShell> {
         ..showLatestFragranceNews = status.showLatestFragranceNews
         ..showCommunity = status.showCommunity
         ..showCompanyReviews = status.showCompanyReviews
+        ..showMailingListSignup = status.showMailingListSignup
         ..homeShelfMode = status.homeShelfMode
         ..featuredProductIds = List.of(status.featuredProductIds)
         ..returnPolicy = status.returnPolicy
@@ -3576,6 +4098,7 @@ class _StoreShellState extends State<StoreShell> {
             ..showLatestFragranceNews = previous.showLatestFragranceNews
             ..showCommunity = previous.showCommunity
             ..showCompanyReviews = previous.showCompanyReviews
+            ..showMailingListSignup = previous.showMailingListSignup
             ..homeShelfMode = previous.homeShelfMode
             ..featuredProductIds = List.of(previous.featuredProductIds)
             ..returnPolicy = previous.returnPolicy
@@ -3622,6 +4145,9 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   Future<void> _upsertCustomer(CustomerAccount customer) async {
+    final previousCustomerEmail = _currentCustomer?.id == customer.id
+        ? _currentCustomer?.email.trim().toLowerCase()
+        : null;
     final emailError = Validators.validateEmail(customer.email);
     if (emailError != null) {
       _showStatusSnack('Customer save failed: $emailError');
@@ -3648,6 +4174,33 @@ class _StoreShellState extends State<StoreShell> {
         _customers.add(customer);
       } else {
         _customers[index] = customer;
+      }
+      if (_currentCustomer?.id == customer.id) {
+        _currentCustomer = customer;
+        if (previousCustomerEmail != null &&
+            previousCustomerEmail != customer.email.trim().toLowerCase()) {
+          for (final order in _orders.where(
+            (order) =>
+                order.email.trim().toLowerCase() == previousCustomerEmail,
+          )) {
+            order.email = customer.email;
+          }
+        }
+        _checkoutEmail = customer.email;
+        _checkoutPhone = customer.phone;
+        _checkoutShippingAddress = ShippingAddress(
+          firstName: customer.name.split(' ').first,
+          lastName: customer.name.split(' ').skip(1).join(' '),
+          addressLine1: customer.addressLine1,
+          addressLine2: customer.addressLine2,
+          city: customer.city,
+          county: customer.county,
+          state: customer.state,
+          postalCode: customer.postalCode,
+          country: customer.country,
+          email: customer.email,
+          phone: customer.phone,
+        );
       }
     });
     try {
@@ -4037,6 +4590,218 @@ class _StoreShellState extends State<StoreShell> {
     _gateway.insertNotification(notification.toRow());
   }
 
+  int get _adminUnreadNotificationCount =>
+      _notifications.where((notification) => !notification.isRead).length;
+
+  int get _pendingReviewCount => [
+    ..._productReviews,
+    ..._companyReviews,
+  ].where((review) => review.status.toLowerCase() == 'pending').length;
+
+  int get _returnRequestCount =>
+      _orders.where((order) => order.returnStatus == 'Return requested').length;
+
+  Map<AdminSection, int> get _adminSectionAttentionCounts {
+    final unreadByType = <String, int>{};
+    for (final notification in _notifications) {
+      if (notification.isRead) {
+        continue;
+      }
+      final type = notification.type.trim().toLowerCase();
+      unreadByType[type] = (unreadByType[type] ?? 0) + 1;
+    }
+
+    final orderNotificationCount =
+        (unreadByType['order'] ?? 0) +
+        (unreadByType['payment'] ?? 0) +
+        (unreadByType['return'] ?? 0) +
+        (unreadByType['shipping'] ?? 0);
+    final reviewNotificationCount = unreadByType['review'] ?? 0;
+    final emailNotificationCount =
+        (unreadByType['email'] ?? 0) +
+        (unreadByType['contact'] ?? 0) +
+        _emailMessages.where((message) => !message.isRead).length;
+
+    final counts = <AdminSection, int>{};
+    void add(AdminSection section, int count) {
+      if (count > 0) {
+        counts[section] = count;
+      }
+    }
+
+    add(AdminSection.notifications, _adminUnreadNotificationCount);
+    add(
+      AdminSection.orders,
+      orderNotificationCount > _returnRequestCount
+          ? orderNotificationCount
+          : _returnRequestCount,
+    );
+    add(
+      AdminSection.reviews,
+      reviewNotificationCount > _pendingReviewCount
+          ? reviewNotificationCount
+          : _pendingReviewCount,
+    );
+    add(AdminSection.email, emailNotificationCount);
+    return counts;
+  }
+
+  void _startAdminAttentionPolling() {
+    _adminNotificationPollTimer?.cancel();
+    _adminNotificationPollTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_refreshAdminAttention()),
+    );
+  }
+
+  Future<void> _refreshAdminAttention() async {
+    if (_currentBackendUser == null || _pollingAdminAttention) {
+      return;
+    }
+    _pollingAdminAttention = true;
+    final knownNotificationIds = _notifications
+        .map((notification) => notification.id)
+        .toSet();
+    final knownOrderIds = _orders.map((order) => order.id).toSet();
+    try {
+      final notificationRows = await _gateway.fetchNotifications();
+      final incomingNotifications = notificationRows
+          .map(StoreNotification.fromRow)
+          .where(
+            (notification) => !knownNotificationIds.contains(notification.id),
+          )
+          .toList();
+      if (incomingNotifications.isNotEmpty && mounted) {
+        setState(() {
+          _notifications.insertAll(0, incomingNotifications);
+        });
+        for (final notification in incomingNotifications) {
+          _presentAdminNotificationAlert(notification);
+        }
+      }
+
+      final orderRows = await _gateway.fetchOrders();
+      final incomingOrders = orderRows
+          .map(Order.fromRow)
+          .where((order) => !knownOrderIds.contains(order.id))
+          .toList();
+      if (incomingOrders.isNotEmpty && mounted) {
+        setState(() {
+          _orders.insertAll(0, incomingOrders);
+        });
+        for (final order in incomingOrders) {
+          _recordOrderReceivedNotification(order);
+        }
+      }
+    } catch (_) {
+      // Polling should never interrupt an active admin session.
+    } finally {
+      _pollingAdminAttention = false;
+    }
+  }
+
+  void _addAdminNotification(
+    StoreNotification notification, {
+    bool persist = false,
+    bool urgent = false,
+  }) {
+    if (_notifications.any((item) => item.id == notification.id)) {
+      return;
+    }
+    if (mounted) {
+      setState(() => _notifications.insert(0, notification));
+    } else {
+      _notifications.insert(0, notification);
+    }
+    if (persist) {
+      unawaited(
+        _gateway.insertNotification(notification.toRow()).catchError((_) {}),
+      );
+    }
+    if (urgent) {
+      _presentAdminNotificationAlert(notification);
+    }
+  }
+
+  AdminSection _adminSectionForNotification(StoreNotification notification) {
+    return switch (notification.type.trim().toLowerCase()) {
+      'order' || 'payment' || 'return' || 'shipping' => AdminSection.orders,
+      'review' => AdminSection.reviews,
+      'email' || 'contact' => AdminSection.email,
+      _ => AdminSection.notifications,
+    };
+  }
+
+  void _openAdminNotification(StoreNotification notification) {
+    _markNotificationRead(notification);
+    _openAdminSection(_adminSectionForNotification(notification));
+  }
+
+  void _presentAdminNotificationAlert(StoreNotification notification) {
+    if (_currentBackendUser == null) {
+      return;
+    }
+    showAdminBrowserAlert(
+      title: notification.title,
+      body: notification.message,
+    );
+    playAdminAlertSound();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _currentBackendUser == null) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 12),
+          behavior: SnackBarBehavior.floating,
+          content: Text('${notification.title}: ${notification.message}'),
+          action: SnackBarAction(
+            label: 'Open',
+            onPressed: () => _openAdminNotification(notification),
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<void> _enableAdminBrowserAlerts() async {
+    final enabled = await requestAdminBrowserAlertPermission();
+    if (!mounted) {
+      return;
+    }
+    if (enabled) {
+      showAdminBrowserAlert(
+        title: 'EgbeAnom admin alerts enabled',
+        body: 'New orders and urgent admin items will notify this computer.',
+      );
+      playAdminAlertSound();
+      _showStatusSnack('Browser notifications and sound are enabled.');
+    } else {
+      _showStatusSnack(
+        'Browser notifications were not enabled. Check this browser permission.',
+      );
+    }
+  }
+
+  void _openAdminSection(AdminSection section) {
+    setState(() {
+      _adminInitialSection = section;
+      _view = StoreView.admin;
+    });
+  }
+
+  void _markNotificationRead(StoreNotification notification) {
+    if (notification.isRead) {
+      return;
+    }
+    setState(() => notification.isRead = true);
+    unawaited(
+      _gateway
+          .updateNotificationReadStatus(notification.id, true)
+          .catchError((_) {}),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _scheduleBrowserRouteSync();
@@ -4087,11 +4852,26 @@ class _StoreShellState extends State<StoreShell> {
             onLogout: _logout,
           ),
           if (_currentBackendUser != null)
+            _AdminNotificationBell(
+              unreadCount: _adminUnreadNotificationCount,
+              pendingReviewCount: _pendingReviewCount,
+              returnRequestCount: _returnRequestCount,
+              notifications: _notifications,
+              onOpenNotifications: () =>
+                  _openAdminSection(AdminSection.notifications),
+              onOpenReviews: () => _openAdminSection(AdminSection.reviews),
+              onOpenReturns: () => _openAdminSection(AdminSection.orders),
+              onEnableBrowserAlerts: _enableAdminBrowserAlerts,
+              onNotificationSelected: (notification) {
+                _openAdminNotification(notification);
+              },
+            ),
+          if (_currentBackendUser != null)
             _NavButton(
               label: 'Admin',
               icon: Icons.dashboard_customize_outlined,
               selected: _view == StoreView.admin,
-              onPressed: () => setState(() => _view = StoreView.admin),
+              onPressed: () => _openAdminSection(AdminSection.overview),
             ),
           if (_currentBackendUser != null)
             TextButton.icon(
@@ -4130,6 +4910,9 @@ class _StoreShellState extends State<StoreShell> {
           companyReviews: _companyReviews
               .where((review) => review.status == 'approved')
               .toList(),
+          customer: _currentCustomer,
+          onJoinMailingList: _joinMailingList,
+          onUpdateAccountMailingList: _updateAccountMailingList,
         ),
       ),
       StoreView.catalog => _storefrontGate(
@@ -4254,6 +5037,8 @@ class _StoreShellState extends State<StoreShell> {
           onCreateAccount: _createAccount,
           onLogin: _login,
           onOAuthLogin: _loginWithOAuth,
+          onSaveCustomer: _upsertCustomer,
+          onRequestReturn: _requestOrderReturn,
           onLogout: _logout,
         ),
       ),
@@ -4279,6 +5064,7 @@ class _StoreShellState extends State<StoreShell> {
                 onLogin: _loginBackendUser,
               )
             : AdminView(
+                initialSection: _adminInitialSection,
                 products: _products
                     .where((product) => product.isActive)
                     .toList(),
@@ -4297,6 +5083,7 @@ class _StoreShellState extends State<StoreShell> {
                   ),
                 ],
                 customers: _customers,
+                mailingListSubscribers: _mailingListSubscribers,
                 dailyMetrics: _dailyMetrics,
                 coupons: _coupons,
                 paymentMethods: _paymentMethods,
@@ -4310,6 +5097,8 @@ class _StoreShellState extends State<StoreShell> {
                 contentBlocks: _contentBlocks,
                 reviews: [..._productReviews, ..._companyReviews],
                 notifications: _notifications,
+                emailMessages: _emailMessages,
+                sectionAttentionCounts: _adminSectionAttentionCounts,
                 siteStatus: _siteStatus,
                 storeInfo: _storeInfo,
                 taxRules: _taxRules,
@@ -4335,16 +5124,21 @@ class _StoreShellState extends State<StoreShell> {
                 onDeleteTaxRule: _deleteTaxRule,
                 onSaveContent: _upsertContent,
                 onUpdateOrder: _updateOrder,
+                onCreateStripeRefund: _createStripeRefund,
                 onCreateShippingLabel: _createShippingLabel,
                 onBatchUpdateOrders: _updateOrdersWithEmail,
                 onUpdateReview: _updateReview,
                 onSendEmail: _sendCustomerEmail,
+                onSyncInboundEmail: _syncInboundEmail,
+                onEmailMessageRead: _markEmailMessageRead,
                 onSaveEmailSettings: _updateEmailSettings,
                 onUpdateSiteStatus: _updateSiteStatus,
                 onSaveCustomer: _upsertCustomer,
                 onBlockIp: _blockIpAddress,
                 onSaveBackendUser: _upsertBackendUser,
                 onApproveFragranceNote: _approveFragranceNote,
+                onNotificationRead: _markNotificationRead,
+                onNotificationOpen: _openAdminNotification,
               ),
       StoreView.paymentSuccess => _storefrontGate(
         PaymentReturnView(
@@ -4364,4 +5158,180 @@ class _StoreShellState extends State<StoreShell> {
       ),
     };
   }
+}
+
+class _AdminNotificationBell extends StatelessWidget {
+  const _AdminNotificationBell({
+    required this.unreadCount,
+    required this.pendingReviewCount,
+    required this.returnRequestCount,
+    required this.notifications,
+    required this.onOpenNotifications,
+    required this.onOpenReviews,
+    required this.onOpenReturns,
+    required this.onEnableBrowserAlerts,
+    required this.onNotificationSelected,
+  });
+
+  final int unreadCount;
+  final int pendingReviewCount;
+  final int returnRequestCount;
+  final List<StoreNotification> notifications;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenReviews;
+  final VoidCallback onOpenReturns;
+  final VoidCallback onEnableBrowserAlerts;
+  final ValueChanged<StoreNotification> onNotificationSelected;
+
+  int get _attentionCount =>
+      unreadCount + pendingReviewCount + returnRequestCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final recentUnread = notifications
+        .where((notification) => !notification.isRead)
+        .take(5)
+        .toList();
+    return PopupMenuButton<Object>(
+      tooltip: 'Admin notifications',
+      offset: const Offset(0, 46),
+      onSelected: (value) {
+        if (value == 'alerts') {
+          onOpenNotifications();
+        } else if (value == 'reviews') {
+          onOpenReviews();
+        } else if (value == 'returns') {
+          onOpenReturns();
+        } else if (value == 'browser-alerts') {
+          onEnableBrowserAlerts();
+        } else if (value is StoreNotification) {
+          onNotificationSelected(value);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<Object>(
+          enabled: false,
+          child: Text(
+            _attentionCount == 0
+                ? 'No urgent admin alerts'
+                : '$_attentionCount admin alert(s)',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        if (pendingReviewCount > 0)
+          PopupMenuItem<Object>(
+            value: 'reviews',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.rate_review_outlined),
+              title: const Text('Reviews awaiting approval'),
+              trailing: Text('$pendingReviewCount'),
+            ),
+          ),
+        if (returnRequestCount > 0)
+          PopupMenuItem<Object>(
+            value: 'returns',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.assignment_return_outlined),
+              title: const Text('Return requests'),
+              trailing: Text('$returnRequestCount'),
+            ),
+          ),
+        if (recentUnread.isEmpty)
+          const PopupMenuItem<Object>(
+            enabled: false,
+            child: Text('No unread notification messages.'),
+          )
+        else
+          for (final notification in recentUnread)
+            PopupMenuItem<Object>(
+              value: notification,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(_notificationIcon(notification.type)),
+                title: Text(
+                  notification.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  notification.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<Object>(
+          value: 'browser-alerts',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.campaign_outlined),
+            title: Text('Enable desktop alerts'),
+            subtitle: Text('Browser notification with sound'),
+          ),
+        ),
+        const PopupMenuItem<Object>(
+          value: 'alerts',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.notifications_outlined),
+            title: Text('View all alerts'),
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              _attentionCount > 0
+                  ? Icons.notifications_active
+                  : Icons.notifications_outlined,
+              color: Colors.white,
+            ),
+            if (_attentionCount > 0)
+              Positioned(
+                right: -8,
+                top: -8,
+                child: Container(
+                  constraints: const BoxConstraints(
+                    minWidth: 18,
+                    minHeight: 18,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _attentionCount > 99 ? '99+' : '$_attentionCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+IconData _notificationIcon(String type) {
+  return switch (type) {
+    'order' => Icons.shopping_bag_outlined,
+    'return' => Icons.assignment_return_outlined,
+    'review' => Icons.rate_review_outlined,
+    'email' => Icons.outgoing_mail,
+    'payment' => Icons.payments_outlined,
+    _ => Icons.notifications_outlined,
+  };
 }

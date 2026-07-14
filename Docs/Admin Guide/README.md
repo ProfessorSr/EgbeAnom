@@ -6,12 +6,14 @@ It is written for someone who does not code.
 
 ## Start Here
 
-1. Read [Overview](./Overview.md).
-2. Check [Store Info](./Store%20Info.md).
-3. Check [Taxes](./Taxes.md).
-4. Check [Shipping](./Shipping.md).
-5. Check [Email](./Email.md).
-6. Use [Orders](./Orders.md) every day.
+1. Read [Owner Quick Start](./Owner%20Quick%20Start.md).
+2. Print [Routine Checklist](./Routine%20Checklist.md) and keep it near the workstation.
+3. Read [Overview](./Overview.md).
+4. Check [Store Info](./Store%20Info.md).
+5. Check [Taxes](./Taxes.md).
+6. Check [Shipping](./Shipping.md).
+7. Check [Email](./Email.md).
+8. Use [Orders](./Orders.md) every day.
 
 ## Important Rule
 
@@ -19,6 +21,8 @@ Do not ship an order unless its financial status says paid.
 
 ## Pages
 
+- [Owner Quick Start](./Owner%20Quick%20Start.md) - Start here when training the store owner.
+- [Routine Checklist](./Routine%20Checklist.md) - Print this page and keep it near the shipping or admin workstation as a daily reminder.
 - [Overview](./Overview.md) - Use this page first. It shows the biggest numbers and points you to the work that needs attention.
 - [Catalog](./Catalog.md) - Use this to add, edit, and check products.
 - [Categories](./Categories.md) - Use this to group products so shoppers can find them.
@@ -40,6 +44,7 @@ Do not ship an order unless its financial status says paid.
 - [Users](./Users.md) - Use this to manage admin users.
 - [Analytics](./Analytics.md) - Use this to see traffic and store activity.
 - [Reports](./Reports.md) - Use this to understand money, products, shipping, and taxes.
+- [Expansions](./Expansions.md) - Use this page to see optional paid upgrades the client may want later.
 
 ## Browser Book
 

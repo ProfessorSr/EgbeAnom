@@ -328,6 +328,15 @@ create table if not exists public.orders (
   refunded_at timestamptz,
   return_status text not null default 'No return',
   return_reason text not null default '',
+  return_items jsonb not null default '[]'::jsonb,
+  return_admin_comment text not null default '',
+  return_condition text not null default '',
+  refund_option text not null default '',
+  stripe_refund_id text not null default '',
+  rma_number text not null default '',
+  rma_created_at timestamptz,
+  return_requested_at timestamptz,
+  return_decision_at timestamptz,
   return_restocked boolean not null default false,
   returned_at timestamptz,
   invoice_number text not null default '',
@@ -352,6 +361,15 @@ alter table public.orders
   add column if not exists refunded_at timestamptz,
   add column if not exists return_status text not null default 'No return',
   add column if not exists return_reason text not null default '',
+  add column if not exists return_items jsonb not null default '[]'::jsonb,
+  add column if not exists return_admin_comment text not null default '',
+  add column if not exists return_condition text not null default '',
+  add column if not exists refund_option text not null default '',
+  add column if not exists stripe_refund_id text not null default '',
+  add column if not exists rma_number text not null default '',
+  add column if not exists rma_created_at timestamptz,
+  add column if not exists return_requested_at timestamptz,
+  add column if not exists return_decision_at timestamptz,
   add column if not exists return_restocked boolean not null default false,
   add column if not exists returned_at timestamptz,
   add column if not exists tracking_status text not null default '',
@@ -377,6 +395,7 @@ alter table public.orders add constraint orders_fulfillment_status_check
       'Packing',
       'Label printed',
       'Label created',
+      'Awaiting return item',
       'Sent',
       'Shipped',
       'Delivered',
@@ -485,6 +504,25 @@ create table if not exists public.admin_notifications (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.email_messages (
+  id text primary key,
+  mailbox text not null default 'INBOX',
+  message_id text not null default '',
+  from_email text not null default '',
+  from_name text not null default '',
+  to_email text not null default '',
+  subject text not null default '',
+  preview text not null default '',
+  text_body text not null default '',
+  html_body text not null default '',
+  received_at timestamptz not null default now(),
+  is_read boolean not null default false,
+  order_number text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(message_id)
+);
+
 create table if not exists public.analytics_daily_metrics (
   day date primary key,
   label text not null,
@@ -559,6 +597,8 @@ create table if not exists public.store_customers (
   is_blocked boolean not null default false,
   created_ip text not null default '',
   last_login_ip text not null default '',
+  created_source text not null default '',
+  last_login_source text not null default '',
   last_login_at timestamptz,
   blocked_reason text not null default '',
   address_line1 text not null default '',
@@ -582,9 +622,13 @@ alter table public.store_customers
   add column if not exists referral_credits numeric(10,2) not null default 0,
   add column if not exists loyalty_points integer not null default 0,
   add column if not exists referred_by text not null default '',
+  add column if not exists phone text not null default '',
+  add column if not exists accepts_marketing boolean not null default false,
   add column if not exists is_blocked boolean not null default false,
   add column if not exists created_ip text not null default '',
   add column if not exists last_login_ip text not null default '',
+  add column if not exists created_source text not null default '',
+  add column if not exists last_login_source text not null default '',
   add column if not exists last_login_at timestamptz,
   add column if not exists blocked_reason text not null default '',
   add column if not exists address_line1 text not null default '',
@@ -594,6 +638,22 @@ alter table public.store_customers
   add column if not exists state text not null default '',
   add column if not exists postal_code text not null default '',
   add column if not exists country text not null default 'US';
+
+create table if not exists public.mailing_list_subscribers (
+  email text primary key,
+  name text not null default '',
+  source text not null default 'Storefront',
+  is_active boolean not null default true,
+  subscribed_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.mailing_list_subscribers
+  add column if not exists name text not null default '',
+  add column if not exists source text not null default 'Storefront',
+  add column if not exists is_active boolean not null default true,
+  add column if not exists subscribed_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists public.backend_users (
   id text primary key,
@@ -961,6 +1021,7 @@ alter table public.order_items enable row level security;
 alter table public.store_reviews enable row level security;
 alter table public.order_surveys enable row level security;
 alter table public.store_customers enable row level security;
+alter table public.mailing_list_subscribers enable row level security;
 alter table public.backend_users enable row level security;
 alter table public.blocked_ips enable row level security;
 alter table public.site_settings enable row level security;
@@ -969,6 +1030,7 @@ alter table public.credential_access_log enable row level security;
 alter table public.rate_limit_events enable row level security;
 alter table public.admin_audit_log enable row level security;
 alter table public.admin_notifications enable row level security;
+alter table public.email_messages enable row level security;
 alter table public.analytics_daily_metrics enable row level security;
 alter table public.analytics_sessions enable row level security;
 alter table public.analytics_events enable row level security;
@@ -998,6 +1060,10 @@ drop policy if exists "customers own email profile read" on public.store_custome
 drop policy if exists "customers own profile insert" on public.store_customers;
 drop policy if exists "customers own profile update" on public.store_customers;
 drop policy if exists "customers own email profile update" on public.store_customers;
+drop policy if exists "public subscribe mailing list" on public.mailing_list_subscribers;
+drop policy if exists "public update mailing list signup" on public.mailing_list_subscribers;
+drop policy if exists "backend admins read mailing list" on public.mailing_list_subscribers;
+drop policy if exists "backend admins manage mailing list" on public.mailing_list_subscribers;
 drop policy if exists "backend users can read own profile" on public.backend_users;
 drop policy if exists "backend users can read own email profile" on public.backend_users;
 drop policy if exists "backend users can link own email profile" on public.backend_users;
@@ -1031,6 +1097,7 @@ drop policy if exists "backend admins read rate limit events" on public.rate_lim
 drop policy if exists "backend admins manage admin audit log" on public.admin_audit_log;
 drop policy if exists "backend admins manage blocked ips" on public.blocked_ips;
 drop policy if exists "backend admins manage admin notifications" on public.admin_notifications;
+drop policy if exists "backend admins manage email messages" on public.email_messages;
 drop policy if exists "backend admins read analytics daily metrics" on public.analytics_daily_metrics;
 drop policy if exists "backend admins read analytics sessions" on public.analytics_sessions;
 drop policy if exists "public insert analytics sessions" on public.analytics_sessions;
@@ -1296,6 +1363,25 @@ create policy "customers own email profile update" on public.store_customers
     auth_user_id = auth.uid()
     or public.is_backend_admin()
   );
+
+create policy "public subscribe mailing list" on public.mailing_list_subscribers
+  for insert with check (
+    auth.role() in ('anon', 'authenticated')
+    and email <> ''
+  );
+create policy "public update mailing list signup" on public.mailing_list_subscribers
+  for update using (auth.role() in ('anon', 'authenticated'))
+  with check (
+    auth.role() in ('anon', 'authenticated')
+    and email <> ''
+  );
+create policy "backend admins read mailing list" on public.mailing_list_subscribers
+  for select using (public.is_backend_admin());
+create policy "backend admins manage mailing list" on public.mailing_list_subscribers
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+
+grant select on public.mailing_list_subscribers to authenticated;
+grant insert, update on public.mailing_list_subscribers to anon, authenticated;
 
 create policy "backend users can read own profile" on public.backend_users
   for select using (auth_user_id = auth.uid() or public.is_backend_admin());
@@ -1574,6 +1660,55 @@ $$;
 grant execute on function public.restock_inventory_for_order(text, text)
   to authenticated;
 
+create or replace function public.submit_return_request(
+  p_order_number text,
+  p_email text,
+  p_return_reason text,
+  p_return_items jsonb default '[]'::jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_count integer;
+begin
+  if not public.check_rate_limit(
+    'return_request',
+    lower(coalesce(p_email, 'anonymous')),
+    3600,
+    5
+  ) then
+    return false;
+  end if;
+
+  update public.orders
+  set
+    return_status = 'Return requested',
+    return_reason = coalesce(nullif(btrim(p_return_reason), ''), return_reason),
+    return_items = coalesce(p_return_items, '[]'::jsonb),
+    return_admin_comment = '',
+    rma_number = '',
+    rma_created_at = null,
+    return_requested_at = now(),
+    return_decision_at = null,
+    return_restocked = false,
+    returned_at = null,
+    updated_at = now()
+  where order_number = p_order_number
+    and lower(email) = lower(p_email)
+    and financial_status in ('paid', 'Paid', 'partially_refunded', 'Partially refunded')
+    and return_status in ('No return', 'Return rejected', '');
+
+  get diagnostics updated_count = row_count;
+  return updated_count > 0;
+end;
+$$;
+
+grant execute on function public.submit_return_request(text, text, text, jsonb)
+  to anon, authenticated;
+
 create policy "customers can create order items" on public.order_items
   for insert with check (
     checkout_token <> ''
@@ -1690,6 +1825,8 @@ create policy "backend admins manage blocked ips" on public.blocked_ips
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 create policy "backend admins manage admin notifications" on public.admin_notifications
   for all using (public.is_backend_admin()) with check (public.is_backend_admin());
+create policy "backend admins manage email messages" on public.email_messages
+  for all using (public.is_backend_admin()) with check (public.is_backend_admin());
 
 create policy "backend admins upload product image objects" on storage.objects
   for insert with check (
@@ -1714,6 +1851,8 @@ create index if not exists idx_orders_created_at_desc
   on public.orders(created_at desc);
 create index if not exists idx_store_customers_email
   on public.store_customers(email);
+create index if not exists idx_mailing_list_subscribers_active
+  on public.mailing_list_subscribers(is_active, subscribed_at desc);
 create index if not exists idx_store_reviews_status
   on public.store_reviews(status);
 create index if not exists idx_orders_customer_email
@@ -1728,6 +1867,10 @@ create index if not exists idx_order_items_order_id
   on public.order_items(order_id);
 create index if not exists idx_analytics_daily_metrics_day_desc
   on public.analytics_daily_metrics(day desc);
+create index if not exists idx_email_messages_received_desc
+  on public.email_messages(received_at desc);
+create index if not exists idx_email_messages_read_received
+  on public.email_messages(is_read, received_at desc);
 create index if not exists idx_analytics_events_occurred_desc
   on public.analytics_events(occurred_at desc);
 create index if not exists idx_analytics_events_event_occurred

@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://devtecknxpgdhbkdjnvt.supabase.co https:; font-src 'self' data:; connect-src 'self' https://devtecknxpgdhbkdjnvt.supabase.co https://*.sentry.io https://sentry.io; frame-src 'self' https://checkout.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://devtecknxpgdhbkdjnvt.supabase.co https:; font-src 'self' data:; connect-src 'self' https://devtecknxpgdhbkdjnvt.supabase.co; frame-src 'self' https://checkout.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

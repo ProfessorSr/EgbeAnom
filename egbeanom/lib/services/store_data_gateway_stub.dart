@@ -38,6 +38,7 @@ class StoreDataGateway {
     int offset = 0,
     String search = '',
   }) async => [];
+  Future<List<Map<String, dynamic>>> fetchMailingListSubscribers() async => [];
   Future<List<Map<String, dynamic>>> fetchReviews() async => [];
   Future<List<Map<String, dynamic>>> fetchReviewsPage({
     int limit = 100,
@@ -61,6 +62,7 @@ class StoreDataGateway {
     DateTime? to,
   }) async => [];
   Future<List<Map<String, dynamic>>> fetchActiveCarts() async => [];
+  Future<List<Map<String, dynamic>>> fetchEmailMessages() async => [];
   Future<Map<String, dynamic>?> fetchSiteStatus() async => null;
   Future<Map<String, dynamic>?> fetchEmailServerSettings() async => null;
   Future<Map<String, dynamic>?> fetchShippingCarrierCredentials() async => null;
@@ -75,6 +77,10 @@ class StoreDataGateway {
   Future<void> replaceProductVariants(
     int productId,
     List<Map<String, dynamic>> variants,
+  ) async {}
+  Future<void> replaceProductImages(
+    int productId,
+    List<Map<String, dynamic>> images,
   ) async {}
   Future<Map<String, dynamic>?> upsertCategory(
     Map<String, dynamic> category,
@@ -101,10 +107,21 @@ class StoreDataGateway {
     required String orderNumber,
     required String email,
   }) async => true;
+  Future<void> submitReturnRequest({
+    required String orderNumber,
+    required String email,
+    required String reason,
+    required List<Map<String, dynamic>> items,
+  }) async {}
   Future<void> upsertReview(Map<String, dynamic> review) async {}
   Future<void> updateReviewStatus(String reviewId, String status) async {}
+  Future<void> deleteReview(String reviewId) async {}
   Future<void> insertOrderSurvey(Map<String, dynamic> survey) async {}
   Future<void> insertNotification(Map<String, dynamic> notification) async {}
+  Future<void> updateNotificationReadStatus(
+    String notificationId,
+    bool isRead,
+  ) async {}
   Future<void> insertAdminAuditLog(Map<String, dynamic> audit) async {}
   Future<List<Map<String, dynamic>>> fetchWishlist(String email) async => [];
   Future<void> addWishlistItem({
@@ -139,6 +156,9 @@ class StoreDataGateway {
   Future<Map<String, dynamic>?> restoreBackendSession() async => null;
   Future<void> logoutBackendUser() async {}
   Future<void> upsertCustomer(Map<String, dynamic> customer) async {}
+  Future<void> upsertMailingListSubscriber(
+    Map<String, dynamic> subscriber,
+  ) async {}
   Future<void> upsertBlockedIp(Map<String, dynamic> blockedIp) async {}
   Future<void> upsertSiteStatus(Map<String, dynamic> value) async {}
   Future<void> upsertEmailServerSettings(Map<String, dynamic> value) async {}
@@ -151,6 +171,11 @@ class StoreDataGateway {
     String orderId = '',
     String event = '',
   }) async => {'sent': recipients.length};
+  Future<Map<String, dynamic>> syncInboundEmail() async => {'imported': 0};
+  Future<void> updateEmailMessageReadStatus(
+    String messageId,
+    bool isRead,
+  ) async {}
   Future<void> upsertShippingCarrierCredentials(
     Map<String, dynamic> value,
   ) async {}
@@ -179,6 +204,12 @@ class StoreDataGateway {
     required String successUrl,
     required String cancelUrl,
   }) async => '';
+
+  Future<String> createStripeRefund({
+    required String orderNumber,
+    required double amount,
+    required String reason,
+  }) async => 'test_refund_$orderNumber';
 
   Future<ShippingLabelResult> createUspsLabel({
     required Map<String, dynamic> order,

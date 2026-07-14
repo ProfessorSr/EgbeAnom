@@ -20,6 +20,11 @@ class AdminOrderWorkflow {
     'Sent',
     'Shipped',
     'Delivered',
+    'Return requested',
+    'Awaiting return item',
+    'Return approved',
+    'Returned',
+    'Return rejected',
     'Cancelled',
     'Refunded',
   ];
@@ -117,9 +122,25 @@ class AdminOrderWorkflow {
     final status = order.status.toLowerCase();
     final financial = order.financialStatus.toLowerCase();
     final label = order.labelStatus.toLowerCase();
+    final returnStatus = order.returnStatus.toLowerCase();
 
     if (financial == 'refunded' || status == 'refunded') {
       return 'Refunded';
+    }
+    if (returnStatus == 'return requested') {
+      return 'Return requested';
+    }
+    if (returnStatus == 'awaiting return item') {
+      return 'Awaiting return item';
+    }
+    if (returnStatus == 'return approved') {
+      return 'Return approved';
+    }
+    if (returnStatus == 'returned') {
+      return 'Returned';
+    }
+    if (returnStatus == 'return rejected') {
+      return 'Return rejected';
     }
     if (fulfillment == 'cancelled' || status == 'cancelled') {
       return 'Cancelled';

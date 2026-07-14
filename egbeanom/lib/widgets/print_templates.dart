@@ -643,6 +643,99 @@ String _packListHtml(Order order, StoreInfo storeInfo) {
 ''';
 }
 
+String _rmaHtml(Order order, StoreInfo storeInfo) {
+  final storeName = htmlEscape.convert(storeInfo.displayName);
+  final rmaNumber = htmlEscape.convert(
+    order.rmaNumber.trim().isEmpty ? 'Pending RMA' : order.rmaNumber,
+  );
+  final orderId = htmlEscape.convert(order.id);
+  final customer = htmlEscape.convert(order.customer);
+  final reason = htmlEscape.convert(order.returnReason);
+  final comment = htmlEscape.convert(order.returnAdminComment);
+  final returnItems =
+      (order.returnItems.isEmpty
+              ? order.lines.map(ReturnRequestItem.fromLine).toList()
+              : order.returnItems)
+          .map(
+            (item) =>
+                '<tr><td>${htmlEscape.convert(item.productName)}</td><td>${htmlEscape.convert(item.size)}</td><td>${htmlEscape.convert(item.sku)}</td><td>${item.quantity}</td></tr>',
+          )
+          .join();
+  final storeAddress =
+      [
+            storeInfo.displayName,
+            storeInfo.addressLine1,
+            storeInfo.addressLine2,
+            [
+              storeInfo.city,
+              storeInfo.state,
+              storeInfo.postalCode,
+            ].where((item) => item.trim().isNotEmpty).join(', '),
+            storeInfo.country,
+          ]
+          .where((line) => line.trim().isNotEmpty)
+          .map(htmlEscape.convert)
+          .join('<br>');
+  return '''
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>RMA $rmaNumber</title>
+  <style>
+    @page { size: letter; margin: 0.45in; }
+    body { font-family: Arial, sans-serif; color: #172026; }
+    h1 { margin: 0 0 4px; font-size: 28px; }
+    h2 { margin: 20px 0 8px; font-size: 18px; }
+    .header { border-bottom: 2px solid #172026; padding-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+    .box { border: 1px solid #172026; padding: 12px; min-height: 86px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #172026; padding: 8px; text-align: left; }
+    th { background: #f2f2f2; }
+    .label { margin-top: 28px; border: 2px dashed #172026; padding: 18px; min-height: 180px; }
+    .label-title { text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-bottom: 12px; }
+    .large { font-size: 22px; font-weight: 700; }
+    .muted { color: #555; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>$storeName Return Authorization</h1>
+    <div class="large">RMA: $rmaNumber</div>
+    <div>Order: $orderId &nbsp; Customer: $customer</div>
+  </div>
+  <div class="grid">
+    <div class="box">
+      <strong>Customer reason</strong><br>
+      ${reason.isEmpty ? 'No reason provided.' : reason}
+    </div>
+    <div class="box">
+      <strong>Store note</strong><br>
+      ${comment.isEmpty ? 'Approved for return. Include this RMA in the package.' : comment}
+    </div>
+  </div>
+  <h2>Approved return items</h2>
+  <table>
+    <thead><tr><th>Product</th><th>Size</th><th>SKU</th><th>Qty</th></tr></thead>
+    <tbody>$returnItems</tbody>
+  </table>
+  <h2>Instructions</h2>
+  <p>Print this page and include it inside the return package. Attach the return label below to the outside of the package. Refunds are applied after the returned item is received and inspected.</p>
+  <div class="label">
+    <div class="label-title">Return mailing label</div>
+    <div class="muted">Return to:</div>
+    <div class="large">$storeName</div>
+    <div>$storeAddress</div>
+    <br>
+    <div><strong>RMA:</strong> $rmaNumber</div>
+    <div><strong>Order:</strong> $orderId</div>
+  </div>
+</body>
+</html>
+''';
+}
+
 class _InvoiceDocumentPreview extends StatelessWidget {
   const _InvoiceDocumentPreview({
     required this.order,

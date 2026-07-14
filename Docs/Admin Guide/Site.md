@@ -6,6 +6,7 @@ Use this to control public website settings.
 
 - Store online or offline setting.
 - Homepage sections.
+- Homepage mailing list block.
 - Return policy.
 - Public contact information.
 - Analytics or tracking settings.

@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 
+import 'dart:convert';
 import 'dart:html' as html;
 
 String _measurementId = '';
@@ -103,4 +104,41 @@ String currentDeviceLabel() {
     return 'Tablet';
   }
   return 'Desktop';
+}
+
+String currentClientSourceType() {
+  final device = currentDeviceLabel();
+  final userAgent = html.window.navigator.userAgent.toLowerCase();
+  final browser = switch (userAgent) {
+    final value when value.contains('edg/') => 'Edge browser',
+    final value when value.contains('chrome/') => 'Chrome browser',
+    final value when value.contains('firefox/') => 'Firefox browser',
+    final value when value.contains('safari/') => 'Safari browser',
+    _ => 'Browser',
+  };
+  return '$browser on ${device.toLowerCase()}';
+}
+
+Future<String> currentClientIpAddress() async {
+  const endpoints = [
+    'https://api.ipify.org?format=json',
+    'https://api64.ipify.org?format=json',
+  ];
+  for (final endpoint in endpoints) {
+    try {
+      final response = await html.HttpRequest.getString(
+        endpoint,
+      ).timeout(const Duration(seconds: 2));
+      final decoded = jsonDecode(response);
+      if (decoded is Map) {
+        final ip = '${decoded['ip'] ?? ''}'.trim();
+        if (ip.isNotEmpty) {
+          return ip;
+        }
+      }
+    } catch (_) {
+      // IP capture is best effort and should never block login.
+    }
+  }
+  return '';
 }

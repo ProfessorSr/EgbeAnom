@@ -10,7 +10,8 @@ Use this to manage shipping prices, methods, and carrier tools.
 
 ## Labels
 
-- Carrier labels need real carrier account details before launch.
+- Carrier label processors are optional add-ons. The store can launch with flat-rate shipping and clean address-label printing if the client does not want live carrier APIs at first.
+- Carrier labels need real carrier account details only if the client chooses to buy labels inside the site.
 - If carrier label details are missing, the system can still make a clean address label.
 - When a label is created, the order should move to Label created.
 

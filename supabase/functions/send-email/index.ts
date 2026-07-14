@@ -85,19 +85,31 @@ Deno.serve(async (request: Request) => {
         : undefined,
     });
 
-    const result = await transporter.sendMail({
-      from: `"${settings.fromName}" <${settings.fromEmail}>`,
-      to: recipients,
-      subject,
-      html: htmlBody || undefined,
-      text: textBody || undefined,
-    });
+    const messages = kind === 'manual' && recipients.length > 1
+      ? recipients.map((recipient) => [recipient])
+      : [recipients];
+    const results: Record<string, unknown>[] = [];
+
+    for (const messageRecipients of messages) {
+      const result = await transporter.sendMail({
+        from: `"${settings.fromName}" <${settings.fromEmail}>`,
+        to: messageRecipients,
+        subject,
+        html: htmlBody || undefined,
+        text: textBody || undefined,
+      });
+      results.push(result);
+    }
 
     return json({
       sent: recipients.length,
-      messageId: result.messageId ?? '',
-      accepted: Array.isArray(result.accepted) ? result.accepted : [],
-      rejected: Array.isArray(result.rejected) ? result.rejected : [],
+      messageId: results.map((result) => result.messageId ?? '').join(','),
+      accepted: results.flatMap((result) =>
+        Array.isArray(result.accepted) ? result.accepted : []
+      ),
+      rejected: results.flatMap((result) =>
+        Array.isArray(result.rejected) ? result.rejected : []
+      ),
     }, 200, headers);
   } catch (error) {
     return json(

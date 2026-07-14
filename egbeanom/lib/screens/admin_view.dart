@@ -30,11 +30,13 @@ typedef AsyncValueChanged<T> = Future<void> Function(T value);
 class AdminView extends StatefulWidget {
   const AdminView({
     super.key,
+    required this.initialSection,
     required this.products,
     required this.categories,
     required this.orders,
     required this.activeCarts,
     required this.customers,
+    required this.mailingListSubscribers,
     required this.dailyMetrics,
     required this.coupons,
     required this.paymentMethods,
@@ -48,6 +50,8 @@ class AdminView extends StatefulWidget {
     required this.contentBlocks,
     required this.reviews,
     required this.notifications,
+    required this.emailMessages,
+    required this.sectionAttentionCounts,
     required this.siteStatus,
     required this.storeInfo,
     required this.taxRules,
@@ -69,10 +73,13 @@ class AdminView extends StatefulWidget {
     required this.onSaveShippingCredentials,
     required this.onSaveContent,
     required this.onUpdateOrder,
+    required this.onCreateStripeRefund,
     required this.onCreateShippingLabel,
     required this.onBatchUpdateOrders,
     required this.onUpdateReview,
     required this.onSendEmail,
+    required this.onSyncInboundEmail,
+    required this.onEmailMessageRead,
     required this.onSaveEmailSettings,
     required this.onUpdateSiteStatus,
     required this.onSaveStoreInfo,
@@ -83,13 +90,17 @@ class AdminView extends StatefulWidget {
     required this.onBlockIp,
     required this.onSaveBackendUser,
     required this.onApproveFragranceNote,
+    required this.onNotificationRead,
+    required this.onNotificationOpen,
   });
 
+  final AdminSection initialSection;
   final List<Fragrance> products;
   final List<Category> categories;
   final List<Order> orders;
   final List<ActiveCart> activeCarts;
   final List<CustomerAccount> customers;
+  final List<MailingListSubscriber> mailingListSubscribers;
   final List<DailyMetric> dailyMetrics;
   final List<CouponRule> coupons;
   final List<PaymentMethodConfig> paymentMethods;
@@ -103,6 +114,8 @@ class AdminView extends StatefulWidget {
   final List<ContentBlock> contentBlocks;
   final List<ReviewSummary> reviews;
   final List<StoreNotification> notifications;
+  final List<EmailMessage> emailMessages;
+  final Map<AdminSection, int> sectionAttentionCounts;
   final SiteStatus siteStatus;
   final StoreInfo storeInfo;
   final List<TaxRule> taxRules;
@@ -132,6 +145,8 @@ class AdminView extends StatefulWidget {
   onSaveShippingCredentials;
   final AsyncValueChanged<ContentBlock> onSaveContent;
   final AsyncValueChanged<Order> onUpdateOrder;
+  final Future<String> Function(Order order, double amount, String reason)
+  onCreateStripeRefund;
   final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
   final void Function(
     List<Order> orders,
@@ -142,6 +157,8 @@ class AdminView extends StatefulWidget {
   final Future<void> Function(ReviewSummary review, String status)
   onUpdateReview;
   final void Function(String audience, String subject, String body) onSendEmail;
+  final AsyncCallback onSyncInboundEmail;
+  final void Function(EmailMessage message, bool isRead) onEmailMessageRead;
   final AsyncValueChanged<EmailServerSettings> onSaveEmailSettings;
   final AsyncValueChanged<SiteStatus> onUpdateSiteStatus;
   final AsyncValueChanged<StoreInfo> onSaveStoreInfo;
@@ -152,44 +169,32 @@ class AdminView extends StatefulWidget {
   final ValueChanged<String> onBlockIp;
   final AsyncValueChanged<BackendUser> onSaveBackendUser;
   final AsyncValueChanged<String> onApproveFragranceNote;
+  final ValueChanged<StoreNotification> onNotificationRead;
+  final ValueChanged<StoreNotification> onNotificationOpen;
 
   @override
   State<AdminView> createState() => _AdminViewState();
 }
 
 class _AdminViewState extends State<AdminView> {
-  AdminSection _section = AdminSection.overview;
+  late AdminSection _section = widget.initialSection;
   Fragrance? _editing;
 
-  double get _revenue =>
-      widget.orders.fold(0, (total, order) => total + order.total);
-  int get _inventory =>
-      widget.products.fold(0, (total, product) => total + product.stock);
-  int get _unitsSold =>
-      widget.products.fold(0, (total, product) => total + product.sold);
-  int get _reservedInventory =>
-      widget.activeCarts.fold(0, (total, cart) => total + cart.itemCount);
-  double get _cartValue =>
-      widget.activeCarts.fold(0, (total, cart) => total + cart.value);
-  int get _newUsersToday =>
-      widget.customers.where((customer) => customer.joinedDaysAgo == 0).length;
-  int get _newUsers7Days =>
-      widget.dailyMetrics.fold(0, (total, metric) => total + metric.newUsers);
-  double get _conversionRate {
-    final visits = widget.dailyMetrics.fold(
-      0,
-      (total, metric) => total + metric.visits,
-    );
-    final orders = widget.dailyMetrics.fold(
-      0,
-      (total, metric) => total + metric.orders,
-    );
-    return visits == 0 ? 0 : orders / visits * 100;
+  @override
+  void didUpdateWidget(covariant AdminView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialSection != oldWidget.initialSection) {
+      setState(() => _section = widget.initialSection);
+    }
   }
 
-  List<Fragrance> get _lowStockProducts => widget.products
-      .where((product) => product.stock <= product.reorderPoint)
-      .toList();
+  AdminDashboardMetrics get _metrics => AdminDashboardMetrics.from(
+    products: widget.products,
+    orders: widget.orders,
+    activeCarts: widget.activeCarts,
+    customers: widget.customers,
+    dailyMetrics: widget.dailyMetrics,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -245,6 +250,7 @@ class _AdminViewState extends State<AdminView> {
           const SizedBox(height: 16),
           _AdminSectionBar(
             selected: _section,
+            attentionCounts: widget.sectionAttentionCounts,
             onSelected: (section) => setState(() => _section = section),
           ),
           const SizedBox(height: 18),
@@ -255,18 +261,19 @@ class _AdminViewState extends State<AdminView> {
   }
 
   Widget _buildSection(BuildContext context) {
+    final metrics = _metrics;
     return switch (_section) {
       AdminSection.overview => _AdminOverview(
-        revenue: _revenue,
-        inventory: _inventory,
-        unitsSold: _unitsSold,
+        revenue: metrics.revenue,
+        inventory: metrics.inventory,
+        unitsSold: metrics.unitsSold,
         orderCount: widget.orders.length,
-        reservedInventory: _reservedInventory,
-        cartValue: _cartValue,
-        newUsersToday: _newUsersToday,
-        newUsers7Days: _newUsers7Days,
-        conversionRate: _conversionRate,
-        lowStockProducts: _lowStockProducts,
+        reservedInventory: metrics.reservedInventory,
+        cartValue: metrics.cartValue,
+        newUsersToday: metrics.newUsersToday,
+        newUsers7Days: metrics.newUsers7Days,
+        conversionRate: metrics.conversionRate,
+        lowStockProducts: metrics.lowStockProducts,
         activeCarts: widget.activeCarts,
         dailyMetrics: widget.dailyMetrics,
         products: widget.products,
@@ -305,7 +312,7 @@ class _AdminViewState extends State<AdminView> {
       AdminSection.inventory => _InventorySection(
         products: widget.products,
         activeCarts: widget.activeCarts,
-        lowStockProducts: _lowStockProducts,
+        lowStockProducts: metrics.lowStockProducts,
         measurementSystem: widget.measurementSystem,
         onOpenReports: () => setState(() => _section = AdminSection.reports),
         onEdit: (product) {
@@ -342,15 +349,19 @@ class _AdminViewState extends State<AdminView> {
         orders: widget.orders,
         activeCarts: widget.activeCarts,
         storeInfo: widget.storeInfo,
+        onSendEmail: widget.onSendEmail,
         onSaveCustomer: widget.onSaveCustomer,
         onBlockIp: widget.onBlockIp,
       ),
       AdminSection.orders => _OrdersSection(
         orders: widget.orders,
+        customers: widget.customers,
         shippingOptions: widget.shippingOptions,
         storeInfo: widget.storeInfo,
         siteStatus: widget.siteStatus,
         onUpdateOrder: widget.onUpdateOrder,
+        onSaveCustomer: widget.onSaveCustomer,
+        onCreateStripeRefund: widget.onCreateStripeRefund,
         onCreateShippingLabel: widget.onCreateShippingLabel,
         onBatchUpdateOrders: widget.onBatchUpdateOrders,
       ),
@@ -366,11 +377,17 @@ class _AdminViewState extends State<AdminView> {
       ),
       AdminSection.notifications => _NotificationsSection(
         notifications: widget.notifications,
+        onNotificationRead: widget.onNotificationRead,
+        onNotificationOpen: widget.onNotificationOpen,
       ),
       AdminSection.email => _EmailSection(
         customers: widget.customers,
+        mailingListSubscribers: widget.mailingListSubscribers,
+        messages: widget.emailMessages,
         settings: widget.emailSettings,
         onSendEmail: widget.onSendEmail,
+        onSyncInbox: widget.onSyncInboundEmail,
+        onMessageRead: widget.onEmailMessageRead,
         onSaveSettings: widget.onSaveEmailSettings,
       ),
       AdminSection.site => _SiteStatusSection(
@@ -402,7 +419,7 @@ class _AdminViewState extends State<AdminView> {
         reviews: widget.reviews,
         events: widget.analyticsEvents,
         activeCarts: widget.activeCarts,
-        conversionRate: _conversionRate,
+        conversionRate: metrics.conversionRate,
         onOpenSection: (section) => setState(() => _section = section),
       ),
       AdminSection.reports => _ReportsSection(
@@ -417,7 +434,7 @@ class _AdminViewState extends State<AdminView> {
         contentBlocks: widget.contentBlocks,
         reviews: widget.reviews,
         backendUsers: widget.backendUsers,
-        conversionRate: _conversionRate,
+        conversionRate: metrics.conversionRate,
       ),
     };
   }
@@ -537,9 +554,14 @@ class _AdminLoginViewState extends State<AdminLoginView> {
 }
 
 class _AdminSectionBar extends StatelessWidget {
-  const _AdminSectionBar({required this.selected, required this.onSelected});
+  const _AdminSectionBar({
+    required this.selected,
+    required this.attentionCounts,
+    required this.onSelected,
+  });
 
   final AdminSection selected;
+  final Map<AdminSection, int> attentionCounts;
   final ValueChanged<AdminSection> onSelected;
 
   @override
@@ -592,10 +614,25 @@ class _AdminSectionBar extends StatelessWidget {
                     Icon(item.$2, color: Colors.white, size: 20),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        item.$3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              item.$3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          if ((attentionCounts[item.$1] ?? 0) > 0) ...[
+                            const SizedBox(width: 8),
+                            _AdminSectionAttentionBadge(
+                              count: attentionCounts[item.$1]!,
+                              foreground: Colors.white,
+                              background: const Color(0xFFB3261E),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ],
@@ -609,7 +646,22 @@ class _AdminSectionBar extends StatelessWidget {
                     children: [
                       Icon(item.$2, color: const Color(0xFF23130D)),
                       const SizedBox(width: 10),
-                      Expanded(child: Text(item.$3)),
+                      Expanded(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(child: Text(item.$3)),
+                            if ((attentionCounts[item.$1] ?? 0) > 0) ...[
+                              const SizedBox(width: 8),
+                              _AdminSectionAttentionBadge(
+                                count: attentionCounts[item.$1]!,
+                                foreground: Colors.white,
+                                background: const Color(0xFFB3261E),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -620,6 +672,40 @@ class _AdminSectionBar extends StatelessWidget {
               }
             },
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminSectionAttentionBadge extends StatelessWidget {
+  const _AdminSectionAttentionBadge({
+    required this.count,
+    required this.foreground,
+    required this.background,
+  });
+
+  final int count;
+  final Color foreground;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -672,30 +758,13 @@ class _AdminOverview extends StatefulWidget {
 class _AdminOverviewState extends State<_AdminOverview> {
   int _windowDays = 14;
 
-  List<DailyMetric> _lastMetrics(int days) {
-    if (widget.dailyMetrics.length <= days) {
-      return widget.dailyMetrics;
-    }
-    return widget.dailyMetrics.sublist(widget.dailyMetrics.length - days);
-  }
-
-  List<DailyMetric> get _windowMetrics => _lastMetrics(_windowDays);
-
-  int get _ordersInWindow =>
-      _windowMetrics.fold(0, (sum, metric) => sum + metric.orders);
-  int get _usersInWindow =>
-      _windowMetrics.fold(0, (sum, metric) => sum + metric.newUsers);
-  double get _revenueInWindow =>
-      _windowMetrics.fold(0, (sum, metric) => sum + metric.revenue);
-  int get _visitsInWindow =>
-      _windowMetrics.fold(0, (sum, metric) => sum + metric.visits);
-  double get _averageOrderValue =>
-      _ordersInWindow == 0 ? 0 : _revenueInWindow / _ordersInWindow;
-  double get _revenuePerVisit =>
-      _visitsInWindow == 0 ? 0 : _revenueInWindow / _visitsInWindow;
-
   @override
   Widget build(BuildContext context) {
+    final metrics = AdminOverviewWindowMetrics.from(
+      days: _windowDays,
+      dailyMetrics: widget.dailyMetrics,
+      orders: widget.orders,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -737,11 +806,11 @@ class _AdminOverviewState extends State<_AdminOverview> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Revenue is ${currency(_revenueInWindow)} from $_ordersInWindow orders, with ${widget.conversionRate.toStringAsFixed(1)}% conversion and ${currency(_averageOrderValue)} average order value.',
+                    'Revenue is ${currency(metrics.revenue)} from ${metrics.orders} orders, with ${widget.conversionRate.toStringAsFixed(1)}% conversion and ${currency(metrics.averageOrderValue)} average order value.',
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Acquisition added $_usersInWindow users and generated $_visitsInWindow visits (${currency(_revenuePerVisit)} revenue per visit).',
+                    'Acquisition added ${metrics.users} users and generated ${metrics.visits} visits (${currency(metrics.revenuePerVisit)} revenue per visit).',
                   ),
                 ],
               ),
@@ -761,25 +830,25 @@ class _AdminOverviewState extends State<_AdminOverview> {
             _MetricData(
               Icons.payments_outlined,
               'Revenue ($_windowDays days)',
-              currency(_revenueInWindow),
+              currency(metrics.revenue),
               targetSection: AdminSection.reports,
             ),
             _MetricData(
               Icons.receipt_long_outlined,
               'Orders ($_windowDays days)',
-              '$_ordersInWindow',
+              '${metrics.orders}',
               targetSection: AdminSection.orders,
             ),
             _MetricData(
               Icons.analytics_outlined,
               'Avg order value',
-              currency(_averageOrderValue),
+              currency(metrics.averageOrderValue),
               targetSection: AdminSection.reports,
             ),
             _MetricData(
               Icons.swap_vert_circle_outlined,
               'Revenue per visit',
-              currency(_revenuePerVisit),
+              currency(metrics.revenuePerVisit),
               targetSection: AdminSection.analytics,
             ),
             _MetricData(
@@ -791,7 +860,7 @@ class _AdminOverviewState extends State<_AdminOverview> {
             _MetricData(
               Icons.groups_outlined,
               'New users ($_windowDays days)',
-              '$_usersInWindow',
+              '${metrics.users}',
               targetSection: AdminSection.customers,
             ),
             _MetricData(
@@ -803,7 +872,7 @@ class _AdminOverviewState extends State<_AdminOverview> {
             _MetricData(
               Icons.visibility_outlined,
               'Visits ($_windowDays days)',
-              '$_visitsInWindow',
+              '${metrics.visits}',
               targetSection: AdminSection.analytics,
             ),
           ],
@@ -1498,49 +1567,54 @@ class _MiniTableCard extends StatelessWidget {
     required this.title,
     required this.action,
     required this.rows,
-    required this.onTap,
+    this.onTap,
   });
 
   final String title;
   final String action;
   final List<String> rows;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  TextButton(onPressed: onTap, child: Text(action)),
-                ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-              const SizedBox(height: 6),
-              if (rows.isEmpty)
-                const Text('No records yet.')
-              else
-                for (final row in rows)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(row),
-                  ),
+              if (onTap != null)
+                TextButton(onPressed: onTap, child: Text(action)),
             ],
           ),
-        ),
+          const SizedBox(height: 6),
+          if (rows.isEmpty)
+            const Text('No records yet.')
+          else
+            for (final row in rows)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(row),
+              ),
+        ],
       ),
+    );
+    return Card(
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
+      child: onTap == null
+          ? content
+          : InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: content,
+            ),
     );
   }
 }
@@ -1570,43 +1644,41 @@ class _ChartCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
-    required this.onTap,
+    this.onTap,
     this.trailing,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final content = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 2),
+          Row(
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  Expanded(child: Text(subtitle)),
-                  ?trailing,
-                  if (trailing != null) const SizedBox(width: 8),
-                  const Icon(Icons.open_in_new, size: 16),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(height: 160, child: child),
+              Expanded(child: Text(subtitle)),
+              ?trailing,
+              if (trailing != null) const SizedBox(width: 8),
+              if (onTap != null) const Icon(Icons.open_in_new, size: 16),
             ],
           ),
-        ),
+          const SizedBox(height: 10),
+          SizedBox(height: 160, child: child),
+        ],
       ),
+    );
+    return Card(
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
@@ -4909,6 +4981,7 @@ class _CustomersSection extends StatefulWidget {
     required this.orders,
     required this.activeCarts,
     required this.storeInfo,
+    required this.onSendEmail,
     required this.onSaveCustomer,
     required this.onBlockIp,
   });
@@ -4917,6 +4990,7 @@ class _CustomersSection extends StatefulWidget {
   final List<Order> orders;
   final List<ActiveCart> activeCarts;
   final StoreInfo storeInfo;
+  final void Function(String audience, String subject, String body) onSendEmail;
   final AsyncValueChanged<CustomerAccount> onSaveCustomer;
   final ValueChanged<String> onBlockIp;
 
@@ -4939,7 +5013,9 @@ class _CustomersSectionState extends State<_CustomersSection> {
           customer.email.toLowerCase().contains(query) ||
           customer.segment.toLowerCase().contains(query) ||
           customer.createdIp.toLowerCase().contains(query) ||
-          customer.lastLoginIp.toLowerCase().contains(query);
+          customer.lastLoginIp.toLowerCase().contains(query) ||
+          customer.createdSource.toLowerCase().contains(query) ||
+          customer.lastLoginSource.toLowerCase().contains(query);
     }).toList();
     customers.sort((a, b) {
       return switch (_sortBy) {
@@ -5063,6 +5139,7 @@ class _CustomersSectionState extends State<_CustomersSection> {
                                 DataColumn(label: Text('Segment')),
                                 DataColumn(label: Text('Status')),
                                 DataColumn(label: Text('Last IP')),
+                                DataColumn(label: Text('Source')),
                                 DataColumn(label: Text('Referral')),
                               ],
                               rows: [
@@ -5093,7 +5170,20 @@ class _CustomersSectionState extends State<_CustomersSection> {
                                               : 'Active',
                                         ),
                                       ),
-                                      DataCell(Text(customer.lastLoginIp)),
+                                      DataCell(
+                                        Text(
+                                          customer.lastLoginIp.isEmpty
+                                              ? 'Not recorded'
+                                              : customer.lastLoginIp,
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          customer.lastLoginSource.isEmpty
+                                              ? 'Unknown'
+                                              : customer.lastLoginSource,
+                                        ),
+                                      ),
                                       DataCell(Text(customer.referralCode)),
                                     ],
                                   ),
@@ -5124,6 +5214,7 @@ class _CustomersSectionState extends State<_CustomersSection> {
                               .where((cart) => cart.customer == selected.name)
                               .toList(),
                     storeInfo: widget.storeInfo,
+                    onSendEmail: widget.onSendEmail,
                     onSaveCustomer: widget.onSaveCustomer,
                     onBlockIp: widget.onBlockIp,
                   ),
@@ -5143,6 +5234,7 @@ class _CustomerProfilePanel extends StatelessWidget {
     required this.orders,
     required this.carts,
     required this.storeInfo,
+    required this.onSendEmail,
     required this.onSaveCustomer,
     required this.onBlockIp,
   });
@@ -5151,6 +5243,7 @@ class _CustomerProfilePanel extends StatelessWidget {
   final List<Order> orders;
   final List<ActiveCart> carts;
   final StoreInfo storeInfo;
+  final void Function(String audience, String subject, String body) onSendEmail;
   final AsyncValueChanged<CustomerAccount> onSaveCustomer;
   final ValueChanged<String> onBlockIp;
 
@@ -5210,6 +5303,29 @@ class _CustomerProfilePanel extends StatelessWidget {
                   ? 'Not recorded'
                   : customer.lastLoginIp,
             ),
+            _CustomerMetaRow(
+              icon: Icons.devices_outlined,
+              label: 'Last source type',
+              value: customer.lastLoginSource.isEmpty
+                  ? 'Unknown'
+                  : customer.lastLoginSource,
+            ),
+            _CustomerMetaRow(
+              icon: Icons.history_outlined,
+              label: 'Created from',
+              value:
+                  [
+                    if (customer.createdIp.isNotEmpty) customer.createdIp,
+                    if (customer.createdSource.isNotEmpty)
+                      customer.createdSource,
+                  ].isEmpty
+                  ? 'Not recorded'
+                  : [
+                      if (customer.createdIp.isNotEmpty) customer.createdIp,
+                      if (customer.createdSource.isNotEmpty)
+                        customer.createdSource,
+                    ].join(' • '),
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -5233,6 +5349,11 @@ class _CustomerProfilePanel extends StatelessWidget {
                   Chip(
                     avatar: const Icon(Icons.history, size: 18),
                     label: Text('Created from ${customer.createdIp}'),
+                  ),
+                if (customer.lastLoginSource.isNotEmpty)
+                  Chip(
+                    avatar: const Icon(Icons.devices_outlined, size: 18),
+                    label: Text(customer.lastLoginSource),
                   ),
               ],
             ),
@@ -5270,6 +5391,13 @@ class _CustomerProfilePanel extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () =>
+                  _showCustomerEmailDialog(context, customer, onSendEmail),
+              icon: const Icon(Icons.mail_outline),
+              label: const Text('Send email'),
             ),
             if (customer.blockedReason.isNotEmpty) ...[
               const SizedBox(height: 6),
@@ -5355,6 +5483,74 @@ void _showInvoiceDialog(
   );
 }
 
+void _showCustomerEmailDialog(
+  BuildContext context,
+  CustomerAccount customer,
+  void Function(String audience, String subject, String body) onSendEmail,
+) {
+  final subject = TextEditingController();
+  final body = TextEditingController();
+  var htmlMode = true;
+  showDialog<void>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text('Email ${customer.name}'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(customer.email),
+              const SizedBox(height: 12),
+              TextField(
+                controller: subject,
+                decoration: const InputDecoration(labelText: 'Subject'),
+              ),
+              const SizedBox(height: 10),
+              _HtmlEditorField(
+                controller: body,
+                compact: true,
+                htmlMode: htmlMode,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Send as HTML email'),
+                value: htmlMode,
+                onChanged: (value) => setDialogState(() => htmlMode = value),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              onSendEmail(
+                customer.email.trim().toLowerCase(),
+                subject.text.trim(),
+                htmlMode
+                    ? '<html><body>${body.text.trim()}</body></html>'
+                    : body.text.trim(),
+              );
+              Navigator.of(context).pop();
+            },
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Send'),
+          ),
+        ],
+      ),
+    ),
+  ).whenComplete(() {
+    subject.dispose();
+    body.dispose();
+  });
+}
+
 class _CustomerMetaRow extends StatelessWidget {
   const _CustomerMetaRow({
     required this.icon,
@@ -5402,19 +5598,26 @@ String _formatCustomerDate(DateTime? value) {
 class _OrdersSection extends StatefulWidget {
   const _OrdersSection({
     required this.orders,
+    required this.customers,
     required this.shippingOptions,
     required this.storeInfo,
     required this.siteStatus,
     required this.onUpdateOrder,
+    required this.onSaveCustomer,
+    required this.onCreateStripeRefund,
     required this.onCreateShippingLabel,
     required this.onBatchUpdateOrders,
   });
 
   final List<Order> orders;
+  final List<CustomerAccount> customers;
   final List<ShippingOption> shippingOptions;
   final StoreInfo storeInfo;
   final SiteStatus siteStatus;
   final AsyncValueChanged<Order> onUpdateOrder;
+  final AsyncValueChanged<CustomerAccount> onSaveCustomer;
+  final Future<String> Function(Order order, double amount, String reason)
+  onCreateStripeRefund;
   final Future<ShippingLabelResult> Function(Order order) onCreateShippingLabel;
   final void Function(
     List<Order> orders,
@@ -5611,6 +5814,354 @@ class _OrdersSectionState extends State<_OrdersSection> {
     );
   }
 
+  double _requestedReturnProductTotal(Order order) {
+    if (order.returnItems.isEmpty) {
+      return order.subtotal > 0 ? order.subtotal : order.total;
+    }
+    return order.returnItems.fold(0.0, (total, item) => total + item.total);
+  }
+
+  String _newRmaNumber(Order order) {
+    final suffix = DateTime.now().millisecondsSinceEpoch.toString();
+    return 'RMA-${order.id}-${suffix.substring(suffix.length - 6)}';
+  }
+
+  Future<void> _showReturnDecisionDialog(Order order) async {
+    final condition = TextEditingController(text: order.returnCondition);
+    final refundReason = TextEditingController(text: order.refundReason);
+    final comments = TextEditingController(text: order.returnAdminComment);
+    final productTotal = _requestedReturnProductTotal(order);
+    final specificAmount = TextEditingController(
+      text: order.refundTotal > 0
+          ? order.refundTotal.toStringAsFixed(2)
+          : productTotal.toStringAsFixed(2),
+    );
+    final storedRefundOption = order.refundOption.split('•').first.trim();
+    var refundOption = storedRefundOption.isEmpty
+        ? 'Product plus shipping'
+        : storedRefundOption;
+    var decision = order.returnStatus == 'Return requested'
+        ? 'Approve'
+        : 'Receive returned item';
+    var refundDestination = 'Payment method';
+    var restockItems = order.returnRestocked;
+    var processing = false;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final amount = switch (refundOption) {
+              'Product plus shipping' => productTotal + order.shippingTotal,
+              'Just product' => productTotal,
+              'Just shipping' => order.shippingTotal,
+              _ => double.tryParse(specificAmount.text.trim()) ?? 0,
+            };
+            return AlertDialog(
+              title: Text('Review return ${order.id}'),
+              content: SizedBox(
+                width: 620,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (order.returnReason.trim().isNotEmpty)
+                        Text('Customer reason: ${order.returnReason}'),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: decision,
+                        decoration: const InputDecoration(labelText: 'Action'),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Approve',
+                            child: Text('Approve return request'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Deny',
+                            child: Text('Deny return request'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Receive returned item',
+                            child: Text('Item received - issue refund'),
+                          ),
+                        ],
+                        onChanged: processing
+                            ? null
+                            : (value) => setDialogState(
+                                () => decision = value ?? decision,
+                              ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: condition,
+                        enabled: !processing,
+                        decoration: const InputDecoration(
+                          labelText: 'Return condition',
+                        ),
+                        minLines: 2,
+                        maxLines: 4,
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: comments,
+                        enabled: !processing,
+                        decoration: const InputDecoration(
+                          labelText: 'Admin comments',
+                        ),
+                        minLines: 2,
+                        maxLines: 4,
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: refundOption,
+                        decoration: const InputDecoration(
+                          labelText: 'Refund amount',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Product plus shipping',
+                            child: Text('Full: product plus shipping'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Just product',
+                            child: Text('Product only'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Just shipping',
+                            child: Text('Shipping only'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Specific dollar amount',
+                            child: Text('Specific dollar amount'),
+                          ),
+                        ],
+                        onChanged: processing
+                            ? null
+                            : (value) => setDialogState(
+                                () => refundOption = value ?? refundOption,
+                              ),
+                      ),
+                      if (refundOption == 'Specific dollar amount') ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: specificAmount,
+                          enabled: !processing,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Specific amount',
+                          ),
+                          onChanged: (_) => setDialogState(() {}),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: refundDestination,
+                        decoration: const InputDecoration(
+                          labelText: 'Refund destination',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Payment method',
+                            child: Text('Return to payment method'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Store credit',
+                            child: Text('Apply as store credit'),
+                          ),
+                        ],
+                        onChanged: processing
+                            ? null
+                            : (value) => setDialogState(
+                                () => refundDestination =
+                                    value ?? refundDestination,
+                              ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: refundReason,
+                        enabled: !processing,
+                        decoration: const InputDecoration(
+                          labelText: 'Refund reason',
+                        ),
+                      ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: restockItems,
+                        title: const Text('Restock returned items'),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: processing
+                            ? null
+                            : (value) => setDialogState(
+                                () => restockItems = value ?? false,
+                              ),
+                      ),
+                      Text(
+                        '${refundDestination == 'Store credit' ? 'Store credit' : 'Payment refund'} amount: ${currency(amount)}',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: processing
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: processing
+                      ? null
+                      : () async {
+                          final approved = decision != 'Deny';
+                          final amount = switch (refundOption) {
+                            'Product plus shipping' =>
+                              productTotal + order.shippingTotal,
+                            'Just product' => productTotal,
+                            'Just shipping' => order.shippingTotal,
+                            _ =>
+                              double.tryParse(specificAmount.text.trim()) ?? 0,
+                          };
+                          setDialogState(() => processing = true);
+                          try {
+                            var refundId = '';
+                            if (!approved) {
+                              refundId = '';
+                            } else if (decision == 'Receive returned item' &&
+                                amount > 0 &&
+                                refundDestination == 'Payment method') {
+                              refundId = await widget.onCreateStripeRefund(
+                                order,
+                                amount,
+                                refundReason.text.trim(),
+                              );
+                            } else if (decision == 'Receive returned item' &&
+                                amount > 0 &&
+                                refundDestination == 'Store credit') {
+                              await _applyStoreCredit(order, amount);
+                              refundId = 'Store credit';
+                            }
+                            order
+                              ..returnStatus = !approved
+                                  ? 'Return rejected'
+                                  : decision == 'Receive returned item'
+                                  ? 'Returned'
+                                  : 'Awaiting return item'
+                              ..returnCondition = condition.text.trim()
+                              ..refundOption =
+                                  '$refundOption • $refundDestination'
+                              ..refundTotal = approved ? amount : 0
+                              ..refundReason = refundReason.text.trim()
+                              ..returnAdminComment = comments.text.trim()
+                              ..refundStatus = !approved
+                                  ? 'Refund denied'
+                                  : decision == 'Receive returned item'
+                                  ? amount >= order.total - 0.01
+                                        ? 'Refunded'
+                                        : 'Partially refunded'
+                                  : 'Refund pending'
+                              ..financialStatus =
+                                  approved &&
+                                      decision == 'Receive returned item' &&
+                                      refundDestination == 'Payment method'
+                                  ? amount >= order.total - 0.01
+                                        ? 'Refunded'
+                                        : 'Partially refunded'
+                                  : order.financialStatus
+                              ..refundReference = refundId
+                              ..stripeRefundId =
+                                  refundDestination == 'Payment method'
+                                  ? refundId
+                                  : ''
+                              ..refundedAt =
+                                  approved &&
+                                      decision == 'Receive returned item' &&
+                                      amount > 0
+                                  ? DateTime.now()
+                                  : order.refundedAt
+                              ..returnRestocked = restockItems
+                              ..returnedAt = decision == 'Receive returned item'
+                                  ? DateTime.now()
+                                  : order.returnedAt
+                              ..rmaNumber = approved
+                                  ? (order.rmaNumber.trim().isEmpty
+                                        ? _newRmaNumber(order)
+                                        : order.rmaNumber)
+                                  : ''
+                              ..rmaCreatedAt = approved
+                                  ? order.rmaCreatedAt ?? DateTime.now()
+                                  : null
+                              ..returnDecisionAt = DateTime.now()
+                              ..status = !approved
+                                  ? order.status
+                                  : decision == 'Receive returned item'
+                                  ? 'Returned'
+                                  : 'Awaiting return item'
+                              ..fulfillmentStatus = !approved
+                                  ? order.fulfillmentStatus
+                                  : decision == 'Receive returned item'
+                                  ? 'Delivered'
+                                  : 'Awaiting return item';
+                            await widget.onUpdateOrder(order);
+                            if (context.mounted) {
+                              Navigator.of(context).pop();
+                            }
+                          } catch (error) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Refund failed: $error'),
+                                ),
+                              );
+                            }
+                            setDialogState(() => processing = false);
+                          }
+                        },
+                  icon: processing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.assignment_turned_in_outlined),
+                  label: Text(processing ? 'Saving' : 'Submit'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      condition.dispose();
+      refundReason.dispose();
+      specificAmount.dispose();
+      comments.dispose();
+    }
+  }
+
+  Future<void> _applyStoreCredit(Order order, double amount) async {
+    final email = order.email.trim().toLowerCase();
+    final customer = widget.customers.firstWhere(
+      (item) => item.email.trim().toLowerCase() == email,
+      orElse: () => CustomerAccount(
+        id: email,
+        name: order.customer,
+        email: email,
+        joinedDaysAgo: 0,
+        orders: 0,
+        lifetimeValue: 0,
+        segment: 'Customer',
+      ),
+    );
+    await widget.onSaveCustomer(
+      customer.copyWith(referralCredits: customer.referralCredits + amount),
+    );
+  }
+
   Future<void> _applyBatchAction() async {
     switch (_batchAction) {
       case 'Print Invoice':
@@ -5745,6 +6296,11 @@ class _OrdersSectionState extends State<_OrdersSection> {
               Icons.local_shipping_outlined,
               'Shipped',
               '${widget.orders.where((o) => AdminOrderWorkflow.workflowStatus(o) == 'Shipped').length}',
+            ),
+            _MetricData(
+              Icons.assignment_return_outlined,
+              'Return requests',
+              '${widget.orders.where((o) => o.returnStatus == 'Return requested').length}',
             ),
             _MetricData(
               Icons.check_box_outlined,
@@ -5934,10 +6490,43 @@ class _OrdersSectionState extends State<_OrdersSection> {
                           ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 8, 14),
-                        child: _OrderFulfillmentEditor(
-                          order: order,
-                          onSave: widget.onUpdateOrder,
-                          onCreateShippingLabel: widget.onCreateShippingLabel,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                if (order.returnStatus == 'Return requested' ||
+                                    order.returnStatus ==
+                                        'Awaiting return item' ||
+                                    order.returnStatus == 'Return approved')
+                                  FilledButton.icon(
+                                    onPressed: () =>
+                                        _showReturnDecisionDialog(order),
+                                    icon: const Icon(
+                                      Icons.assignment_turned_in_outlined,
+                                    ),
+                                    label: Text(
+                                      order.returnStatus == 'Return requested'
+                                          ? 'Review return request'
+                                          : 'Review return / refund',
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (order.returnStatus != 'No return') ...[
+                              const SizedBox(height: 10),
+                              _ReturnSummaryPanel(order: order),
+                            ],
+                            const SizedBox(height: 12),
+                            _OrderFulfillmentEditor(
+                              order: order,
+                              onSave: widget.onUpdateOrder,
+                              onCreateShippingLabel:
+                                  widget.onCreateShippingLabel,
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -6168,7 +6757,7 @@ class _ReviewsSection extends StatelessWidget {
                         ),
                         IconButton.outlined(
                           tooltip: 'Delete',
-                          onPressed: () => onUpdateReview(review, 'rejected'),
+                          onPressed: () => onUpdateReview(review, 'delete'),
                           icon: const Icon(Icons.delete_outline),
                         ),
                       ],
@@ -6184,9 +6773,15 @@ class _ReviewsSection extends StatelessWidget {
 }
 
 class _NotificationsSection extends StatefulWidget {
-  const _NotificationsSection({required this.notifications});
+  const _NotificationsSection({
+    required this.notifications,
+    required this.onNotificationRead,
+    required this.onNotificationOpen,
+  });
 
   final List<StoreNotification> notifications;
+  final ValueChanged<StoreNotification> onNotificationRead;
+  final ValueChanged<StoreNotification> onNotificationOpen;
 
   @override
   State<_NotificationsSection> createState() => _NotificationsSectionState();
@@ -6218,6 +6813,8 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
                   leading: Icon(
                     item.type == 'order'
                         ? Icons.shopping_bag_outlined
+                        : item.type == 'return'
+                        ? Icons.assignment_return_outlined
                         : item.type == 'email'
                         ? Icons.outgoing_mail
                         : Icons.notifications_outlined,
@@ -6228,9 +6825,10 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
                   selected: _selected == item,
                   onTap: () {
                     setState(() {
-                      item.isRead = true;
                       _selected = item;
                     });
+                    widget.onNotificationRead(item);
+                    widget.onNotificationOpen(item);
                   },
                   trailing: Text(
                     '${item.createdAt.month}/${item.createdAt.day} ${item.createdAt.hour.toString().padLeft(2, '0')}:${item.createdAt.minute.toString().padLeft(2, '0')}',
@@ -6498,7 +7096,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                   child: _ChartCard(
                     title: 'Traffic over time',
                     subtitle: 'GA-style users/sessions trend',
-                    onTap: () {},
                     trailing: _RangeSelector(
                       value: _trafficRange,
                       onChanged: (value) =>
@@ -6516,7 +7113,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                   child: _ChartCard(
                     title: 'New users',
                     subtitle: 'New customer/user acquisition trend',
-                    onTap: () {},
                     trailing: _RangeSelector(
                       value: _trafficRange,
                       onChanged: (value) =>
@@ -6607,7 +7203,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                       _ChartCard(
                         title: 'Traffic sources',
                         subtitle: 'Search, direct, social, referral',
-                        onTap: () {},
                         trailing: _RangeSelector(
                           value: _trafficRange,
                           onChanged: (value) =>
@@ -6626,7 +7221,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                       _ChartCard(
                         title: 'Pages being viewed',
                         subtitle: 'Current active page distribution',
-                        onTap: () {},
                         child: _MiniBarChart(
                           points: pageCounts.entries
                               .map(
@@ -6656,7 +7250,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                   child: _ChartCard(
                     title: 'When sales happen',
                     subtitle: 'Time-of-day sales analysis',
-                    onTap: () {},
                     trailing: _RangeSelector(
                       value: _salesRange,
                       onChanged: (value) => setState(() => _salesRange = value),
@@ -6678,7 +7271,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
                   child: _ChartCard(
                     title: 'Seasonal sales',
                     subtitle: 'Month-by-month revenue',
-                    onTap: () {},
                     trailing: _RangeSelector(
                       value: _reportRange,
                       onChanged: (value) =>
@@ -6887,7 +7479,6 @@ class _GoogleAnalyticsReportGrid extends StatelessWidget {
                   child: _ChartCard(
                     title: 'Traffic acquisition',
                     subtitle: 'Session source mix like GA acquisition',
-                    onTap: () {},
                     child: _MiniBarChart(
                       points: sourcePoints,
                       color: const Color(0xFF27724E),
@@ -6903,7 +7494,6 @@ class _GoogleAnalyticsReportGrid extends StatelessWidget {
                   child: _ChartCard(
                     title: 'Pages and screens',
                     subtitle: 'Tracked page view distribution',
-                    onTap: () {},
                     child: _MiniBarChart(
                       points: pagePoints,
                       color: const Color(0xFF5A6FA8),
@@ -6922,7 +7512,6 @@ class _GoogleAnalyticsReportGrid extends StatelessWidget {
                   child: _ChartCard(
                     title: 'Tech details',
                     subtitle: 'Device categories from live sessions',
-                    onTap: () {},
                     child: _MiniBarChart(
                       points: devicePoints,
                       color: const Color(0xFFC88F52),
@@ -6939,7 +7528,6 @@ class _GoogleAnalyticsReportGrid extends StatelessWidget {
                     title: 'Top referrers',
                     action: 'Analytics',
                     rows: referrerRows,
-                    onTap: () {},
                   ),
                 ),
                 if (wide)
@@ -6956,7 +7544,6 @@ class _GoogleAnalyticsReportGrid extends StatelessWidget {
                       'Views per visit: ${viewsPerVisit.toStringAsFixed(2)}',
                       'Tracked events feed ecommerce and page reports.',
                     ],
-                    onTap: () {},
                   ),
                 ),
               ],
@@ -7206,14 +7793,22 @@ class _RangeSelector extends StatelessWidget {
 class _EmailSection extends StatefulWidget {
   const _EmailSection({
     required this.customers,
+    required this.mailingListSubscribers,
+    required this.messages,
     required this.settings,
     required this.onSendEmail,
+    required this.onSyncInbox,
+    required this.onMessageRead,
     required this.onSaveSettings,
   });
 
   final List<CustomerAccount> customers;
+  final List<MailingListSubscriber> mailingListSubscribers;
+  final List<EmailMessage> messages;
   final EmailServerSettings settings;
   final void Function(String audience, String subject, String body) onSendEmail;
+  final AsyncCallback onSyncInbox;
+  final void Function(EmailMessage message, bool isRead) onMessageRead;
   final AsyncValueChanged<EmailServerSettings> onSaveSettings;
 
   @override
@@ -7235,6 +7830,9 @@ class _EmailSectionState extends State<_EmailSection> {
   late String _provider;
   late bool _useSsl;
   bool _htmlMode = true;
+  String _mailboxFilter = 'inbox';
+  EmailMessage? _selectedMessage;
+  bool _syncingInbox = false;
   final List<EmailTemplate> _templates = [
     EmailTemplate(
       key: 'order_received',
@@ -7296,34 +7894,335 @@ class _EmailSectionState extends State<_EmailSection> {
     super.dispose();
   }
 
+  String _mailingListAudienceCountText(
+    String audience,
+    int accountCount,
+    int nonAccountCount,
+  ) {
+    return switch (audience) {
+      'Account mailing list' => '$accountCount account recipient(s)',
+      'Non-account mailing list' => '$nonAccountCount non-account recipient(s)',
+      _ =>
+        '${accountCount + nonAccountCount} mailing list recipient(s): $accountCount account, $nonAccountCount non-account',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final audiences = [
-      'All customers',
-      'VIP customers',
-      'New customers',
-      ...widget.customers.map((customer) => customer.email),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth > 900;
-        return Flex(
-          direction: wide ? Axis.horizontal : Axis.vertical,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              flex: wide ? 5 : 0,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
+    final accountMailingCount = widget.customers
+        .where((customer) => customer.acceptsMarketing)
+        .length;
+    final accountEmails = widget.customers
+        .map((customer) => customer.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty)
+        .toSet();
+    final nonAccountMailingCount = widget.mailingListSubscribers
+        .where(
+          (subscriber) =>
+              subscriber.isActive &&
+              !accountEmails.contains(subscriber.email.trim().toLowerCase()),
+        )
+        .length;
+    final unreadCount = widget.messages
+        .where((message) => !message.isRead)
+        .length;
+    final visibleMessages = _mailboxFilter == 'unread'
+        ? widget.messages.where((message) => !message.isRead).toList()
+        : widget.messages;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _MailboxToolbar(
+            title: 'Mailbox',
+            subtitle:
+                '${widget.settings.fromEmail}  |  ${widget.messages.length} message(s)',
+            unreadCount: unreadCount,
+            syncing: _syncingInbox,
+            onCompose: () => _showComposeDialog(),
+            onSync: _syncInbox,
+            onSettings: _showEmailSettingsDialog,
+          ),
+          const Divider(height: 1),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 980;
+              final sidebar = _MailboxSidebar(
+                selected: _mailboxFilter,
+                inboxCount: widget.messages.length,
+                unreadCount: unreadCount,
+                accountMailingCount: accountMailingCount,
+                nonAccountMailingCount: nonAccountMailingCount,
+                onSelect: (value) {
+                  if (value == 'compose') {
+                    _showComposeDialog();
+                    return;
+                  }
+                  setState(() => _mailboxFilter = value);
+                },
+              );
+              final list = _InboxMessageList(
+                messages: visibleMessages,
+                selectedMessage: _selectedMessage,
+                onSelect: _selectMessage,
+              );
+              if (!wide) {
+                return Padding(
+                  padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        'Email delivery settings',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
+                      SizedBox(height: 260, child: sidebar),
                       const SizedBox(height: 12),
+                      SizedBox(height: 520, child: list),
+                    ],
+                  ),
+                );
+              }
+              return SizedBox(
+                height: 680,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(width: 230, child: sidebar),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: list),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _syncInbox() async {
+    setState(() => _syncingInbox = true);
+    try {
+      await widget.onSyncInbox();
+    } finally {
+      if (mounted) {
+        setState(() => _syncingInbox = false);
+      }
+    }
+  }
+
+  List<String> _emailAudiences() {
+    return [
+      'All customers',
+      'All mailing list',
+      'Account mailing list',
+      'Non-account mailing list',
+      'VIP customers',
+      'New customers',
+      if (_audience.contains('@') && _audience.contains('.')) _audience,
+    ];
+  }
+
+  int get _accountMailingCount =>
+      widget.customers.where((customer) => customer.acceptsMarketing).length;
+
+  int get _nonAccountMailingCount {
+    final accountEmails = widget.customers
+        .map((customer) => customer.email.trim().toLowerCase())
+        .where((email) => email.isNotEmpty)
+        .toSet();
+    return widget.mailingListSubscribers
+        .where(
+          (subscriber) =>
+              subscriber.isActive &&
+              !accountEmails.contains(subscriber.email.trim().toLowerCase()),
+        )
+        .length;
+  }
+
+  void _selectMessage(EmailMessage message) {
+    setState(() {
+      _selectedMessage = message;
+    });
+    if (!message.isRead) {
+      widget.onMessageRead(message, true);
+    }
+    _showMessageDialog(message);
+  }
+
+  void _replyToMessage(EmailMessage message) {
+    setState(() {
+      _audience = message.fromEmail.trim().toLowerCase();
+      _subject.text = message.subject.toLowerCase().startsWith('re:')
+          ? message.subject
+          : 'Re: ${message.subject}';
+      _body.text =
+          '<p></p><hr><p><strong>Original message from ${htmlEscape.convert(message.fromEmail)}</strong></p><p>${htmlEscape.convert(message.preview)}</p>';
+      _htmlMode = true;
+    });
+    _showComposeDialog(title: 'Reply');
+  }
+
+  void _forwardMessage(EmailMessage message) {
+    final from = message.fromName.trim().isEmpty
+        ? message.fromEmail
+        : '${message.fromName} <${message.fromEmail}>';
+    final body = message.textBody.trim().isNotEmpty
+        ? message.textBody
+        : message.preview;
+    setState(() {
+      _audience = '';
+      _subject.text = message.subject.toLowerCase().startsWith('fwd:')
+          ? message.subject
+          : 'Fwd: ${message.subject}';
+      _body.text =
+          '<p></p><hr><p><strong>Forwarded message</strong></p><p><strong>From:</strong> ${htmlEscape.convert(from)}<br><strong>To:</strong> ${htmlEscape.convert(message.toEmail)}<br><strong>Subject:</strong> ${htmlEscape.convert(message.subject)}</p><p>${htmlEscape.convert(body)}</p>';
+      _htmlMode = true;
+    });
+    _showComposeDialog(title: 'Forward');
+  }
+
+  void _sendComposedEmail() {
+    widget.onSendEmail(
+      _audience,
+      _subject.text.trim(),
+      _htmlMode
+          ? '<html><body>${_body.text.trim()}</body></html>'
+          : _body.text.trim(),
+    );
+  }
+
+  Future<void> _showComposeDialog({String title = 'Compose'}) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, dialogSetState) {
+            return AlertDialog(
+              title: Text(title),
+              content: SizedBox(
+                width: 760,
+                height: MediaQuery.sizeOf(context).height * 0.72,
+                child: _EmailComposerPanel(
+                  audiences: _emailAudiences(),
+                  audience: _audience,
+                  accountMailingCount: _accountMailingCount,
+                  nonAccountMailingCount: _nonAccountMailingCount,
+                  subject: _subject,
+                  body: _body,
+                  htmlMode: _htmlMode,
+                  templates: _templates,
+                  audienceCountText: _mailingListAudienceCountText,
+                  onAudienceChanged: (value) {
+                    setState(() => _audience = value);
+                    dialogSetState(() {});
+                  },
+                  onHtmlModeChanged: (value) {
+                    setState(() => _htmlMode = value);
+                    dialogSetState(() {});
+                  },
+                  onUseTemplate: (template) {
+                    setState(() {
+                      _subject.text = template.subject;
+                      _body.text = template.htmlBody;
+                      _htmlMode = true;
+                    });
+                    dialogSetState(() {});
+                  },
+                  onSend: () {
+                    _sendComposedEmail();
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showMessageDialog(EmailMessage message) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          titlePadding: const EdgeInsets.fromLTRB(24, 20, 12, 0),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  message.subject,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Close',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          content: SizedBox(
+            width: 760,
+            height: MediaQuery.sizeOf(context).height * 0.68,
+            child: _EmailMessageViewer(message: message),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                widget.onMessageRead(message, !message.isRead);
+                Navigator.of(context).pop();
+              },
+              icon: Icon(
+                message.isRead
+                    ? Icons.mark_email_unread_outlined
+                    : Icons.mark_email_read_outlined,
+              ),
+              label: Text(message.isRead ? 'Mark unread' : 'Mark read'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _forwardMessage(message);
+              },
+              icon: const Icon(Icons.forward_outlined),
+              label: const Text('Forward'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _replyToMessage(message);
+              },
+              icon: const Icon(Icons.reply_outlined),
+              label: const Text('Reply'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showEmailSettingsDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, dialogSetState) {
+            return AlertDialog(
+              title: const Text('Email settings'),
+              content: SizedBox(
+                width: 680,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       DropdownButtonFormField<String>(
                         initialValue: _provider,
                         decoration: const InputDecoration(
@@ -7350,9 +8249,10 @@ class _EmailSectionState extends State<_EmailSection> {
                             _provider = provider;
                             _applyEmailProviderPreset(provider);
                           });
+                          dialogSetState(() {});
                         },
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
@@ -7375,7 +8275,7 @@ class _EmailSectionState extends State<_EmailSection> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
@@ -7388,7 +8288,7 @@ class _EmailSectionState extends State<_EmailSection> {
                           ),
                           const SizedBox(width: 10),
                           SizedBox(
-                            width: 110,
+                            width: 120,
                             child: TextField(
                               controller: _imapPort,
                               decoration: const InputDecoration(
@@ -7399,7 +8299,7 @@ class _EmailSectionState extends State<_EmailSection> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
@@ -7412,7 +8312,7 @@ class _EmailSectionState extends State<_EmailSection> {
                           ),
                           const SizedBox(width: 10),
                           SizedBox(
-                            width: 110,
+                            width: 120,
                             child: TextField(
                               controller: _smtpPort,
                               decoration: const InputDecoration(
@@ -7423,14 +8323,14 @@ class _EmailSectionState extends State<_EmailSection> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: _username,
                         decoration: const InputDecoration(
                           labelText: 'Mailbox username',
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: _password,
                         decoration: const InputDecoration(
@@ -7445,142 +8345,44 @@ class _EmailSectionState extends State<_EmailSection> {
                           'Turn on for port 465. Leave off for port 587 STARTTLS.',
                         ),
                         value: _useSsl,
-                        onChanged: (value) => setState(() => _useSsl = value),
-                      ),
-                      const SizedBox(height: 10),
-                      FilledButton.icon(
-                        onPressed: () => widget.onSaveSettings(
-                          EmailServerSettings(
-                            provider: _provider,
-                            fromName: _fromName.text.trim(),
-                            fromEmail: _fromEmail.text.trim(),
-                            imapHost: _imapHost.text.trim(),
-                            imapPort: int.tryParse(_imapPort.text) ?? 993,
-                            smtpHost: _smtpHost.text.trim(),
-                            smtpPort: int.tryParse(_smtpPort.text) ?? 587,
-                            username: _username.text.trim(),
-                            password: _password.text,
-                            useSsl: _useSsl,
-                          ),
-                        ),
-                        icon: const Icon(Icons.save_outlined),
-                        label: const Text('Save email settings'),
+                        onChanged: (value) {
+                          setState(() => _useSsl = value);
+                          dialogSetState(() {});
+                        },
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
-            if (wide) const SizedBox(width: 16) else const SizedBox(height: 16),
-            Expanded(
-              flex: wide ? 5 : 0,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Customer email',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: _audience,
-                        decoration: const InputDecoration(
-                          labelText: 'Audience',
-                        ),
-                        items: [
-                          for (final item in audiences)
-                            DropdownMenuItem(value: item, child: Text(item)),
-                        ],
-                        onChanged: (value) =>
-                            setState(() => _audience = value ?? _audience),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _subject,
-                        decoration: const InputDecoration(labelText: 'Subject'),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _body,
-                        decoration: InputDecoration(
-                          labelText: _htmlMode ? 'HTML message' : 'Message',
-                        ),
-                        minLines: 5,
-                        maxLines: 8,
-                      ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Send as HTML email'),
-                        value: _htmlMode,
-                        onChanged: (value) => setState(() => _htmlMode = value),
-                      ),
-                      const SizedBox(height: 14),
-                      FilledButton.icon(
-                        onPressed: () => widget.onSendEmail(
-                          _audience,
-                          _subject.text.trim(),
-                          _htmlMode
-                              ? '<html><body>${_body.text.trim()}</body></html>'
-                              : _body.text.trim(),
-                        ),
-                        icon: const Icon(Icons.send_outlined),
-                        label: const Text('Queue email'),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Email templates',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      for (final template in _templates)
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          title: Text(template.name),
-                          subtitle: Text(template.subject),
-                          children: [
-                            TextFormField(
-                              initialValue: template.subject,
-                              decoration: const InputDecoration(
-                                labelText: 'Subject',
-                              ),
-                              onChanged: (value) => template.subject = value,
-                            ),
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              initialValue: template.htmlBody,
-                              decoration: const InputDecoration(
-                                labelText: 'HTML body',
-                              ),
-                              minLines: 4,
-                              maxLines: 8,
-                              onChanged: (value) => template.htmlBody = value,
-                            ),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    _subject.text = template.subject;
-                                    _body.text = template.htmlBody;
-                                    _htmlMode = true;
-                                  });
-                                },
-                                icon: const Icon(Icons.edit_note_outlined),
-                                label: const Text('Use template'),
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
                 ),
-              ),
-            ),
-          ],
+                FilledButton.icon(
+                  onPressed: () {
+                    widget.onSaveSettings(
+                      EmailServerSettings(
+                        provider: _provider,
+                        fromName: _fromName.text.trim(),
+                        fromEmail: _fromEmail.text.trim(),
+                        imapHost: _imapHost.text.trim(),
+                        imapPort: int.tryParse(_imapPort.text) ?? 993,
+                        smtpHost: _smtpHost.text.trim(),
+                        smtpPort: int.tryParse(_smtpPort.text) ?? 587,
+                        username: _username.text.trim(),
+                        password: _password.text,
+                        useSsl: _useSsl,
+                      ),
+                    );
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Save settings'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -7622,6 +8424,567 @@ class _EmailSectionState extends State<_EmailSection> {
   }
 }
 
+class _MailboxToolbar extends StatelessWidget {
+  const _MailboxToolbar({
+    required this.title,
+    required this.subtitle,
+    required this.unreadCount,
+    required this.syncing,
+    required this.onCompose,
+    required this.onSync,
+    required this.onSettings,
+  });
+
+  final String title;
+  final String subtitle;
+  final int unreadCount;
+  final bool syncing;
+  final VoidCallback onCompose;
+  final AsyncCallback onSync;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.mail_outline, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          if (unreadCount > 0) ...[
+            Chip(
+              avatar: const Icon(Icons.mark_email_unread_outlined, size: 18),
+              label: Text('$unreadCount unread'),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Tooltip(
+            message: 'Sync inbox',
+            child: IconButton.filledTonal(
+              onPressed: syncing ? null : onSync,
+              icon: syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync_outlined),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Email settings',
+            child: IconButton.filledTonal(
+              onPressed: onSettings,
+              icon: const Icon(Icons.settings_outlined),
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: onCompose,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Compose'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MailboxSidebar extends StatelessWidget {
+  const _MailboxSidebar({
+    required this.selected,
+    required this.inboxCount,
+    required this.unreadCount,
+    required this.accountMailingCount,
+    required this.nonAccountMailingCount,
+    required this.onSelect,
+  });
+
+  final String selected;
+  final int inboxCount;
+  final int unreadCount;
+  final int accountMailingCount;
+  final int nonAccountMailingCount;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          _MailboxRailButton(
+            value: 'compose',
+            selected: selected == 'compose',
+            icon: Icons.edit_outlined,
+            label: 'Compose',
+            onSelect: onSelect,
+          ),
+          const SizedBox(height: 8),
+          _MailboxRailButton(
+            value: 'inbox',
+            selected: selected == 'inbox',
+            icon: Icons.inbox_outlined,
+            label: 'Inbox',
+            count: inboxCount,
+            onSelect: onSelect,
+          ),
+          _MailboxRailButton(
+            value: 'unread',
+            selected: selected == 'unread',
+            icon: Icons.mark_email_unread_outlined,
+            label: 'Unread',
+            count: unreadCount,
+            emphasize: unreadCount > 0,
+            onSelect: onSelect,
+          ),
+          const Divider(height: 28),
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            leading: const Icon(Icons.group_outlined),
+            title: const Text('Account list'),
+            trailing: Text('$accountMailingCount'),
+          ),
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            leading: const Icon(Icons.alternate_email),
+            title: const Text('Public list'),
+            trailing: Text('$nonAccountMailingCount'),
+          ),
+          const Divider(height: 28),
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Mass emails send privately'),
+            subtitle: const Text('Recipients do not see each other.'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MailboxRailButton extends StatelessWidget {
+  const _MailboxRailButton({
+    required this.value,
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onSelect,
+    this.count,
+    this.emphasize = false,
+  });
+
+  final String value;
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final int? count;
+  final bool emphasize;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ListTile(
+      selected: selected,
+      selectedTileColor: colorScheme.primary.withValues(alpha: 0.10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      leading: Icon(icon),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontWeight: selected || emphasize ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+      trailing: count == null
+          ? null
+          : Container(
+              constraints: const BoxConstraints(minWidth: 28),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: emphasize
+                    ? const Color(0xFFB3261E)
+                    : colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$count',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: emphasize ? Colors.white : colorScheme.onSurface,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+      onTap: () => onSelect(value),
+    );
+  }
+}
+
+class _EmailComposerPanel extends StatelessWidget {
+  const _EmailComposerPanel({
+    required this.audiences,
+    required this.audience,
+    required this.accountMailingCount,
+    required this.nonAccountMailingCount,
+    required this.subject,
+    required this.body,
+    required this.htmlMode,
+    required this.templates,
+    required this.audienceCountText,
+    required this.onAudienceChanged,
+    required this.onHtmlModeChanged,
+    required this.onUseTemplate,
+    required this.onSend,
+  });
+
+  final List<String> audiences;
+  final String audience;
+  final int accountMailingCount;
+  final int nonAccountMailingCount;
+  final TextEditingController subject;
+  final TextEditingController body;
+  final bool htmlMode;
+  final List<EmailTemplate> templates;
+  final String Function(String audience, int accountCount, int nonAccountCount)
+  audienceCountText;
+  final ValueChanged<String> onAudienceChanged;
+  final ValueChanged<bool> onHtmlModeChanged;
+  final ValueChanged<EmailTemplate> onUseTemplate;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final mailingAudience =
+        audience == 'All mailing list' ||
+        audience == 'Account mailing list' ||
+        audience == 'Non-account mailing list';
+    final selectedAudience = audiences.contains(audience)
+        ? audience
+        : 'All customers';
+    final showSpecificEmail = audience.trim().isEmpty || audience.contains('@');
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Compose',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: onSend,
+                icon: const Icon(Icons.send_outlined),
+                label: const Text('Send'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: selectedAudience,
+            decoration: const InputDecoration(
+              labelText: 'Audience',
+              prefixIcon: Icon(Icons.person_outline),
+            ),
+            items: [
+              for (final item in audiences)
+                DropdownMenuItem(value: item, child: Text(item)),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                onAudienceChanged(value);
+              }
+            },
+          ),
+          if (showSpecificEmail) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: audience,
+              decoration: const InputDecoration(
+                labelText: 'Specific email address',
+                prefixIcon: Icon(Icons.alternate_email),
+              ),
+              keyboardType: TextInputType.emailAddress,
+              onChanged: onAudienceChanged,
+            ),
+          ],
+          if (mailingAudience) ...[
+            const SizedBox(height: 8),
+            Text(
+              audienceCountText(
+                audience,
+                accountMailingCount,
+                nonAccountMailingCount,
+              ),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: subject,
+            decoration: const InputDecoration(
+              labelText: 'Subject',
+              prefixIcon: Icon(Icons.subject_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _HtmlEditorField(controller: body, htmlMode: htmlMode),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Send as HTML email'),
+            value: htmlMode,
+            onChanged: onHtmlModeChanged,
+          ),
+          const SizedBox(height: 12),
+          Text('Templates', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final template in templates)
+                ActionChip(
+                  avatar: const Icon(Icons.description_outlined, size: 18),
+                  label: Text(template.name),
+                  onPressed: () => onUseTemplate(template),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HtmlEditorField extends StatelessWidget {
+  const _HtmlEditorField({
+    required this.controller,
+    required this.htmlMode,
+    this.compact = false,
+  });
+
+  final TextEditingController controller;
+  final bool htmlMode;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFD8BD80)),
+            borderRadius: BorderRadius.circular(8),
+            color: const Color(0xFF111111),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFF3A3327))),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.code_outlined,
+                      size: 18,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        htmlMode ? 'HTML editor' : 'Message editor',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      htmlMode ? '<html>' : 'text',
+                      style: const TextStyle(
+                        color: Color(0xFFCDBB91),
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+                cursorColor: const Color(0xFFD8BD80),
+                decoration: InputDecoration(
+                  hintText: htmlMode
+                      ? '<h1>Hello</h1>\n<p>Paste or write email HTML here.</p>'
+                      : 'Write the email message here.',
+                  hintStyle: const TextStyle(color: Color(0xFF8E8575)),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+                minLines: compact ? 8 : 16,
+                maxLines: compact ? 12 : 24,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          htmlMode
+              ? 'HTML is wrapped in the EgbeAnom email template when sent.'
+              : 'Turn on HTML email to send this as HTML.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+}
+
+class _InboxMessageList extends StatelessWidget {
+  const _InboxMessageList({
+    required this.messages,
+    required this.selectedMessage,
+    required this.onSelect,
+  });
+
+  final List<EmailMessage> messages;
+  final EmailMessage? selectedMessage;
+  final ValueChanged<EmailMessage> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (messages.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Text('No messages synced yet.'),
+        ),
+      );
+    }
+    final visibleMessages = messages.take(80).toList();
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: visibleMessages.length,
+      separatorBuilder: (context, index) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final message = visibleMessages[index];
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 4,
+          ),
+          selected: selectedMessage?.id == message.id,
+          leading: Icon(
+            message.isRead
+                ? Icons.mark_email_read_outlined
+                : Icons.mark_email_unread_outlined,
+            color: message.isRead ? null : const Color(0xFFC88F52),
+          ),
+          title: Text(
+            message.subject,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: message.isRead ? FontWeight.w500 : FontWeight.w800,
+            ),
+          ),
+          subtitle: Text(
+            '${message.fromEmail}\n${message.preview}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          isThreeLine: true,
+          onTap: () => onSelect(message),
+        );
+      },
+    );
+  }
+}
+
+class _EmailMessageViewer extends StatelessWidget {
+  const _EmailMessageViewer({required this.message});
+
+  final EmailMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = message.textBody.trim().isNotEmpty
+        ? message.textBody
+        : message.preview;
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'From: ${message.fromName.trim().isEmpty ? message.fromEmail : '${message.fromName} <${message.fromEmail}>'}',
+                ),
+                Text('To: ${message.toEmail}'),
+                Text(
+                  'Received: ${message.receivedAt.month}/${message.receivedAt.day}/${message.receivedAt.year} ${message.receivedAt.hour.toString().padLeft(2, '0')}:${message.receivedAt.minute.toString().padLeft(2, '0')}',
+                ),
+                if (message.orderNumber.trim().isNotEmpty)
+                  Text('Order: ${message.orderNumber}'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          SelectableText(body),
+        ],
+      ),
+    );
+  }
+}
+
 class _SiteStatusSection extends StatefulWidget {
   const _SiteStatusSection({
     required this.status,
@@ -7650,6 +9013,7 @@ class _SiteStatusSectionState extends State<_SiteStatusSection> {
   late bool _showLatestFragranceNews;
   late bool _showCommunity;
   late bool _showCompanyReviews;
+  late bool _showMailingListSignup;
   late String _homeShelfMode;
   late Set<int> _featuredProductIds;
 
@@ -7665,6 +9029,7 @@ class _SiteStatusSectionState extends State<_SiteStatusSection> {
     _showLatestFragranceNews = widget.status.showLatestFragranceNews;
     _showCommunity = widget.status.showCommunity;
     _showCompanyReviews = widget.status.showCompanyReviews;
+    _showMailingListSignup = widget.status.showMailingListSignup;
     _homeShelfMode = widget.status.homeShelfMode;
     _featuredProductIds = widget.status.featuredProductIds.toSet();
     _message = TextEditingController(text: widget.status.message);
@@ -7897,6 +9262,13 @@ class _SiteStatusSectionState extends State<_SiteStatusSection> {
                         onChanged: (value) =>
                             setState(() => _showCompanyReviews = value),
                       ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Mailing list signup'),
+                        value: _showMailingListSignup,
+                        onChanged: (value) =>
+                            setState(() => _showMailingListSignup = value),
+                      ),
                       const SizedBox(height: 14),
                       FilledButton.icon(
                         onPressed: () async {
@@ -7923,6 +9295,7 @@ class _SiteStatusSectionState extends State<_SiteStatusSection> {
                                     _showLatestFragranceNews,
                                 showCommunity: _showCommunity,
                                 showCompanyReviews: _showCompanyReviews,
+                                showMailingListSignup: _showMailingListSignup,
                                 homeShelfMode: _homeShelfMode,
                                 featuredProductIds: _featuredProductIds
                                     .toList(),
@@ -9103,26 +10476,10 @@ class _ReportsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final topProducts = [...products]..sort((a, b) => b.sold.compareTo(a.sold));
-    final totalVisits = dailyMetrics.fold(
-      0,
-      (total, metric) => total + metric.visits,
+    final metrics = AdminReportMetrics.from(
+      dailyMetrics: dailyMetrics,
+      products: products,
     );
-    final totalNewUsers = dailyMetrics.fold(
-      0,
-      (total, metric) => total + metric.newUsers,
-    );
-    final totalOrders = dailyMetrics.fold(
-      0,
-      (total, metric) => total + metric.orders,
-    );
-    final totalRevenue = dailyMetrics.fold(
-      0.0,
-      (total, metric) => total + metric.revenue,
-    );
-    final averageOrderValue = totalOrders == 0
-        ? 0.0
-        : totalRevenue / totalOrders;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9148,18 +10505,19 @@ class _ReportsSection extends StatelessWidget {
                   children: [
                     _AnalyticsPill(
                       label: 'Sessions',
-                      value: '$totalVisits',
-                      trend: '+${math.min(totalNewUsers, 9999)} new users',
+                      value: '${metrics.totalVisits}',
+                      trend:
+                          '+${math.min(metrics.totalNewUsers, 9999)} new users',
                     ),
                     _AnalyticsPill(
                       label: 'Conversions',
                       value: '${conversionRate.toStringAsFixed(1)}%',
-                      trend: '$totalOrders orders',
+                      trend: '${metrics.totalOrders} orders',
                     ),
                     _AnalyticsPill(
                       label: 'Revenue',
-                      value: currency(totalRevenue),
-                      trend: '${currency(averageOrderValue)} avg order',
+                      value: currency(metrics.totalRevenue),
+                      trend: '${currency(metrics.averageOrderValue)} avg order',
                     ),
                     _AnalyticsPill(
                       label: 'Audience',
@@ -9175,8 +10533,16 @@ class _ReportsSection extends StatelessWidget {
         const SizedBox(height: 16),
         _MetricGrid(
           metrics: [
-            _MetricData(Icons.visibility_outlined, 'Visits', '$totalVisits'),
-            _MetricData(Icons.person_add_alt, 'New users', '$totalNewUsers'),
+            _MetricData(
+              Icons.visibility_outlined,
+              'Visits',
+              '${metrics.totalVisits}',
+            ),
+            _MetricData(
+              Icons.person_add_alt,
+              'New users',
+              '${metrics.totalNewUsers}',
+            ),
             _MetricData(
               Icons.percent,
               'Conversion',
@@ -9236,7 +10602,7 @@ class _ReportsSection extends StatelessWidget {
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                           const SizedBox(height: 8),
-                          for (final product in topProducts.take(5))
+                          for (final product in metrics.topProducts.take(5))
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: SizedBox.square(
@@ -9557,6 +10923,28 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
               spacing: 10,
               runSpacing: 10,
               children: [
+                OutlinedButton.icon(
+                  onPressed: () => _printTaxReport(orders),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Print tax PDF'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _printProductSalesReport(orders),
+                  icon: const Icon(Icons.table_chart_outlined),
+                  label: const Text('Print product sales'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _printShippingReport(orders),
+                  icon: const Icon(Icons.local_shipping_outlined),
+                  label: const Text('Print shipping'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
                 for (final entry in statusCounts.entries)
                   Chip(
                     avatar: const Icon(Icons.local_activity_outlined, size: 16),
@@ -9806,6 +11194,100 @@ class _TaxReportSummaryPanelState extends State<_TaxReportSummaryPanel> {
     );
   }
 
+  void _printTaxReport(List<Order> orders) {
+    final rows = [
+      for (final row in _taxBreakdownRows(orders))
+        [
+          row['name'] as String,
+          row['jurisdiction'] as String,
+          row['rate'] as String,
+          currency(row['amount'] as double),
+        ],
+    ];
+    _printSpreadsheetReport(
+      title: 'Tax collected report',
+      subtitle: '${orders.length} order(s)',
+      columns: const ['Tax type', 'Jurisdiction', 'Rate', 'Amount'],
+      rows: rows,
+    );
+  }
+
+  void _printProductSalesReport(List<Order> orders) {
+    final rows = [
+      for (final row in _productSalesRows(orders))
+        [
+          row['name'] as String,
+          row['sku'] as String,
+          '${row['quantity']}',
+          currency(row['revenue'] as double),
+        ],
+    ];
+    _printSpreadsheetReport(
+      title: 'Product sales report',
+      subtitle: '${orders.length} order(s)',
+      columns: const ['Product', 'SKU', 'Qty', 'Sales'],
+      rows: rows,
+    );
+  }
+
+  void _printShippingReport(List<Order> orders) {
+    final rows = [
+      for (final row in _shippingBreakdownRows(orders))
+        [
+          row['carrier'] as String,
+          row['service'] as String,
+          '${row['orders']}',
+          currency(row['amount'] as double),
+        ],
+    ];
+    _printSpreadsheetReport(
+      title: 'Shipping collected report',
+      subtitle: '${orders.length} order(s)',
+      columns: const ['Carrier', 'Service', 'Orders', 'Collected'],
+      rows: rows,
+    );
+  }
+
+  void _printSpreadsheetReport({
+    required String title,
+    required String subtitle,
+    required List<String> columns,
+    required List<List<String>> rows,
+  }) {
+    final generated = DateTime.now();
+    final headerCells = columns
+        .map((column) => '<th>${htmlEscape.convert(column)}</th>')
+        .join();
+    final bodyRows = rows.isEmpty
+        ? '<tr><td colspan="${columns.length}">No rows for this report.</td></tr>'
+        : rows
+              .map(
+                (row) =>
+                    '<tr>${row.map((value) => '<td>${htmlEscape.convert(value)}</td>').join()}</tr>',
+              )
+              .join();
+    final html =
+        '''
+<style>
+  @page { size: letter; margin: 0.45in; }
+  body { font-family: Arial, sans-serif; color: #1f1f1f; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .meta { margin-bottom: 16px; color: #555; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th, td { border: 1px solid #222; padding: 6px 7px; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; font-weight: 700; }
+  td:last-child, th:last-child { text-align: right; }
+</style>
+<h1>${htmlEscape.convert(title)}</h1>
+<div class="meta">${htmlEscape.convert(subtitle)} | Generated ${generated.month}/${generated.day}/${generated.year}</div>
+<table>
+  <thead><tr>$headerCells</tr></thead>
+  <tbody>$bodyRows</tbody>
+</table>
+''';
+    printHtmlDocument(title, html);
+  }
+
   DateTime? _cutoff() {
     final now = DateTime.now();
     return switch (_range) {
@@ -9870,27 +11352,44 @@ class _SalesReportPanelState extends State<_SalesReportPanel> {
                   ),
                 ),
                 SizedBox(
-                  width: 150,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _range,
-                    decoration: const InputDecoration(labelText: 'Period'),
-                    items: const [
-                      DropdownMenuItem(value: '7 days', child: Text('7 days')),
-                      DropdownMenuItem(
-                        value: '30 days',
-                        child: Text('30 days'),
+                  width: 300,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _range,
+                          decoration: const InputDecoration(
+                            labelText: 'Period',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: '7 days',
+                              child: Text('7 days'),
+                            ),
+                            DropdownMenuItem(
+                              value: '30 days',
+                              child: Text('30 days'),
+                            ),
+                            DropdownMenuItem(
+                              value: '90 days',
+                              child: Text('90 days'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'This year',
+                              child: Text('This year'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => _range = value ?? _range),
+                        ),
                       ),
-                      DropdownMenuItem(
-                        value: '90 days',
-                        child: Text('90 days'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'This year',
-                        child: Text('This year'),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: 'Print or save PDF',
+                        onPressed: _printSalesReport,
+                        icon: const Icon(Icons.picture_as_pdf_outlined),
                       ),
                     ],
-                    onChanged: (value) =>
-                        setState(() => _range = value ?? _range),
                   ),
                 ),
               ],
@@ -9990,6 +11489,61 @@ class _SalesReportPanelState extends State<_SalesReportPanel> {
       emailCounts[email] = (emailCounts[email] ?? 0) + 1;
     }
     return emailCounts.values.where((count) => count > 1).length;
+  }
+
+  void _printSalesReport() {
+    final rows = [
+      for (final order in _filteredOrders())
+        [
+          order.id,
+          order.createdAt == null
+              ? ''
+              : '${order.createdAt!.month}/${order.createdAt!.day}/${order.createdAt!.year}',
+          order.customer,
+          order.email,
+          order.financialStatus,
+          order.fulfillmentStatus,
+          currency(order.total),
+        ],
+    ];
+    final headerCells = const [
+      'Order',
+      'Date',
+      'Customer',
+      'Email',
+      'Payment',
+      'Status',
+      'Total',
+    ].map((column) => '<th>${htmlEscape.convert(column)}</th>').join();
+    final bodyRows = rows.isEmpty
+        ? '<tr><td colspan="7">No sales for this period.</td></tr>'
+        : rows
+              .map(
+                (row) =>
+                    '<tr>${row.map((value) => '<td>${htmlEscape.convert(value)}</td>').join()}</tr>',
+              )
+              .join();
+    final generated = DateTime.now();
+    final html =
+        '''
+<style>
+  @page { size: letter landscape; margin: 0.45in; }
+  body { font-family: Arial, sans-serif; color: #1f1f1f; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .meta { margin-bottom: 16px; color: #555; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  th, td { border: 1px solid #222; padding: 6px 7px; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; font-weight: 700; }
+  td:last-child, th:last-child { text-align: right; }
+</style>
+<h1>Sales report</h1>
+<div class="meta">${htmlEscape.convert(_range)} | Generated ${generated.month}/${generated.day}/${generated.year}</div>
+<table>
+  <thead><tr>$headerCells</tr></thead>
+  <tbody>$bodyRows</tbody>
+</table>
+''';
+    printHtmlDocument('Egbe Anom sales report', html);
   }
 
   DateTime? _cutoff() {
@@ -11212,6 +12766,9 @@ class _ProductEditorState extends State<ProductEditor> {
   }
 
   Future<void> _save() async {
+    if (_images.isNotEmpty && !_images.any((image) => image.isPrimary)) {
+      _images.first.isPrimary = true;
+    }
     final activeVariants = _variants
         .where((variant) => variant.isActive && variant.size.trim().isNotEmpty)
         .toList();
@@ -12035,6 +13592,54 @@ class _VariantTable extends StatelessWidget {
   }
 }
 
+class _ReturnSummaryPanel extends StatelessWidget {
+  const _ReturnSummaryPanel({required this.order});
+
+  final Order order;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = [
+      'Status: ${order.returnStatus}',
+      if (order.rmaNumber.trim().isNotEmpty) 'RMA: ${order.rmaNumber}',
+      if (order.refundStatus.trim().isNotEmpty)
+        'Refund: ${order.refundStatus} ${order.refundTotal > 0 ? currency(order.refundTotal) : ''}',
+      if (order.refundOption.trim().isNotEmpty)
+        'Refund option: ${order.refundOption}',
+      if (order.refundReason.trim().isNotEmpty) 'Reason: ${order.refundReason}',
+      if (order.returnAdminComment.trim().isNotEmpty)
+        'Admin comment: ${order.returnAdminComment}',
+      if (order.returnCondition.trim().isNotEmpty)
+        'Condition: ${order.returnCondition}',
+      if (order.stripeRefundId.trim().isNotEmpty)
+        'Stripe refund: ${order.stripeRefundId}',
+    ];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFC88F52)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Return / refund',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 6),
+          for (final line in lines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(line),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OrderFulfillmentEditor extends StatefulWidget {
   const _OrderFulfillmentEditor({
     required this.order,
@@ -12057,6 +13662,8 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
   late TextEditingController _refundReference;
   late TextEditingController _refundReason;
   late TextEditingController _returnReason;
+  late TextEditingController _returnAdminComment;
+  late TextEditingController _rmaNumber;
   late String _status;
   late String _financialStatus;
   late String _returnStatus;
@@ -12093,6 +13700,10 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
         : widget.order.returnStatus;
     _returnRestocked = widget.order.returnRestocked;
     _returnReason = TextEditingController(text: widget.order.returnReason);
+    _returnAdminComment = TextEditingController(
+      text: widget.order.returnAdminComment,
+    );
+    _rmaNumber = TextEditingController(text: widget.order.rmaNumber);
   }
 
   String _normalizedStatus(String value) {
@@ -12107,6 +13718,9 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
         status == 'label created' ||
         status == 'label_created') {
       return 'Label created';
+    }
+    if (status == 'awaiting return item') {
+      return 'Awaiting return item';
     }
     if (status == 'invoice created' || status == 'invoice_created') {
       return 'Invoice created';
@@ -12143,6 +13757,8 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
     _refundReference.dispose();
     _refundReason.dispose();
     _returnReason.dispose();
+    _returnAdminComment.dispose();
+    _rmaNumber.dispose();
     super.dispose();
   }
 
@@ -12176,6 +13792,10 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                   DropdownMenuItem(
                     value: 'Label created',
                     child: Text('Label created'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Awaiting return item',
+                    child: Text('Awaiting return item'),
                   ),
                   DropdownMenuItem(value: 'Sent', child: Text('Sent')),
                   DropdownMenuItem(value: 'Shipped', child: Text('Shipped')),
@@ -12292,6 +13912,10 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                     value: 'Return approved',
                     child: Text('Return approved'),
                   ),
+                  DropdownMenuItem(
+                    value: 'Awaiting return item',
+                    child: Text('Awaiting return item'),
+                  ),
                   DropdownMenuItem(value: 'Returned', child: Text('Returned')),
                   DropdownMenuItem(
                     value: 'Return rejected',
@@ -12320,7 +13944,50 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
         const SizedBox(height: 10),
         TextField(
           controller: _returnReason,
-          decoration: const InputDecoration(labelText: 'Return notes'),
+          decoration: const InputDecoration(labelText: 'Customer return note'),
+          readOnly: widget.order.returnStatus == 'Return requested',
+          minLines: 1,
+          maxLines: 3,
+        ),
+        if (widget.order.returnItems.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Requested return items',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (final item in widget.order.returnItems)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.assignment_return_outlined),
+              title: Text(item.productName),
+              subtitle: Text('${item.quantity} x ${item.size} • ${item.sku}'),
+              trailing: Text(currency(item.total)),
+            ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _rmaNumber,
+                decoration: const InputDecoration(labelText: 'RMA number'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _returnAdminComment,
+                decoration: const InputDecoration(
+                  labelText: 'Admin return decision comment',
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 10),
         Row(
@@ -12430,6 +14097,15 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                     'Partially refunded' => 'Partially refunded',
                     _ => 'Not refunded',
                   };
+                  final previousReturnStatus = widget.order.returnStatus;
+                  final needsRma =
+                      _returnStatus == 'Return approved' ||
+                      _returnStatus == 'Awaiting return item';
+                  final rmaNumber = needsRma
+                      ? (_rmaNumber.text.trim().isEmpty
+                            ? 'RMA-${widget.order.id}-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}'
+                            : _rmaNumber.text.trim())
+                      : _rmaNumber.text.trim();
                   widget.order
                     ..financialStatus = _financialStatus
                     ..refundStatus = refundStatus
@@ -12449,12 +14125,27 @@ class _OrderFulfillmentEditorState extends State<_OrderFulfillmentEditor> {
                     ..returnReason = _returnStatus == 'No return'
                         ? ''
                         : _returnReason.text.trim()
-                    ..returnRestocked = _returnStatus == 'No return'
+                    ..returnAdminComment = _returnStatus == 'No return'
+                        ? ''
+                        : _returnAdminComment.text.trim()
+                    ..rmaNumber = _returnStatus == 'No return' ? '' : rmaNumber
+                    ..rmaCreatedAt =
+                        needsRma && widget.order.rmaCreatedAt == null
+                        ? DateTime.now()
+                        : widget.order.rmaCreatedAt
+                    ..returnDecisionAt =
+                        previousReturnStatus != _returnStatus &&
+                            (_returnStatus == 'Return approved' ||
+                                _returnStatus == 'Awaiting return item' ||
+                                _returnStatus == 'Return rejected')
+                        ? DateTime.now()
+                        : widget.order.returnDecisionAt
+                    ..returnRestocked = _returnStatus != 'Returned'
                         ? false
                         : _returnRestocked
-                    ..returnedAt = _returnStatus == 'No return'
-                        ? null
-                        : widget.order.returnedAt ?? DateTime.now()
+                    ..returnedAt = _returnStatus == 'Returned'
+                        ? widget.order.returnedAt ?? DateTime.now()
+                        : null
                     ..status = _financialStatus == 'Refunded'
                         ? 'Refunded'
                         : _status == 'Cancelled'

@@ -16,3 +16,7 @@ String currentTrafficSource() => 'Direct';
 String currentTrafficReferrer() => 'Direct';
 
 String currentDeviceLabel() => 'Unknown device';
+
+String currentClientSourceType() => 'Unknown browser';
+
+Future<String> currentClientIpAddress() async => '';

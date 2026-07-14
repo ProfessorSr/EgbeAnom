@@ -160,6 +160,9 @@ class StoreDataGateway {
     return _listQuery('store_customers', query);
   }
 
+  Future<List<Map<String, dynamic>>> fetchMailingListSubscribers() =>
+      _list('mailing_list_subscribers', order: 'subscribed_at.desc,email.asc');
+
   Future<List<Map<String, dynamic>>> fetchReviews() =>
       fetchReviewsPage(limit: 500);
   Future<List<Map<String, dynamic>>> fetchReviewsPage({
@@ -252,8 +255,12 @@ class StoreDataGateway {
     return _listQuery('analytics_events', query);
   }
 
-  Future<List<Map<String, dynamic>>> fetchActiveCarts() =>
-      _list('active_carts', order: 'last_seen_at.desc');
+  Future<List<Map<String, dynamic>>> fetchActiveCarts() => _listQuery(
+    'active_carts',
+    {'select': '*', 'status': 'eq.active', 'order': 'last_seen_at.desc'},
+  );
+  Future<List<Map<String, dynamic>>> fetchEmailMessages() =>
+      _list('email_messages', order: 'received_at.desc');
 
   Future<List<Map<String, dynamic>>> fetchBackendUsers() =>
       _list('backend_users', order: 'name.asc,email.asc');
@@ -355,6 +362,28 @@ class StoreDataGateway {
         await _insert('product_variants', variants);
       } catch (error) {
         throw StateError('Product size save failed: $error');
+      }
+    }
+  }
+
+  Future<void> replaceProductImages(
+    int productId,
+    List<Map<String, dynamic>> images,
+  ) async {
+    try {
+      await _rest(
+        'product_images',
+        method: 'DELETE',
+        query: {'product_id': 'eq.$productId'},
+      );
+    } catch (error) {
+      throw StateError('Product image cleanup failed: $error');
+    }
+    if (images.isNotEmpty) {
+      try {
+        await _insert('product_images', images);
+      } catch (error) {
+        throw StateError('Product image save failed: $error');
       }
     }
   }
@@ -587,6 +616,23 @@ class StoreDataGateway {
     return response == true || '$response'.toLowerCase() == 'true';
   }
 
+  Future<void> submitReturnRequest({
+    required String orderNumber,
+    required String email,
+    required String reason,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final response = await _rpc('submit_return_request', {
+      'p_order_number': orderNumber,
+      'p_email': email.trim(),
+      'p_return_reason': reason.trim(),
+      'p_return_items': items,
+    });
+    if (response != true && '$response'.toLowerCase() != 'true') {
+      throw StateError('Return request could not be submitted.');
+    }
+  }
+
   Future<void> upsertShippingOption(Map<String, dynamic> option) =>
       _upsert('shipping_options', option);
   Future<void> deleteShippingOption(String optionId) async {
@@ -621,10 +667,22 @@ class StoreDataGateway {
     query: {'id': 'eq.$reviewId'},
     body: {'status': status},
   );
+  Future<void> deleteReview(String reviewId) =>
+      _rest('store_reviews', method: 'DELETE', query: {'id': 'eq.$reviewId'});
   Future<void> insertOrderSurvey(Map<String, dynamic> survey) =>
       _insert('order_surveys', survey);
   Future<void> insertNotification(Map<String, dynamic> notification) =>
       _insert('admin_notifications', notification);
+  Future<void> updateNotificationReadStatus(
+    String notificationId,
+    bool isRead,
+  ) => _rest(
+    'admin_notifications',
+    method: 'PATCH',
+    query: {'id': 'eq.$notificationId'},
+    body: {'is_read': isRead},
+    returnRepresentation: false,
+  );
   Future<void> insertAdminAuditLog(Map<String, dynamic> audit) =>
       _insert('admin_audit_log', audit);
   Future<List<Map<String, dynamic>>> fetchWishlist(String email) async {
@@ -992,6 +1050,10 @@ class StoreDataGateway {
       'referral_credits': source?['referral_credits'] ?? 0,
       'loyalty_points': source?['loyalty_points'] ?? 0,
       'referred_by': source?['referred_by'] ?? '',
+      'created_ip': source?['created_ip'] ?? '',
+      'last_login_ip': source?['last_login_ip'] ?? '',
+      'created_source': source?['created_source'] ?? '',
+      'last_login_source': source?['last_login_source'] ?? '',
       'last_login_at': DateTime.now().toUtc().toIso8601String(),
     };
   }
@@ -1012,6 +1074,15 @@ class StoreDataGateway {
 
   Future<void> upsertCustomer(Map<String, dynamic> customer) =>
       _upsert('store_customers', customer..remove('password'));
+  Future<void> upsertMailingListSubscriber(Map<String, dynamic> subscriber) =>
+      _rest(
+        'mailing_list_subscribers',
+        method: 'POST',
+        query: {'on_conflict': 'email'},
+        body: subscriber,
+        prefer: 'resolution=merge-duplicates',
+        returnRepresentation: false,
+      );
   Future<void> upsertBlockedIp(Map<String, dynamic> blockedIp) =>
       _upsert('blocked_ips', blockedIp);
   Future<void> upsertSiteStatus(Map<String, dynamic> value) => _upsert(
@@ -1045,6 +1116,31 @@ class StoreDataGateway {
       'event': event,
     },
   );
+  Future<Map<String, dynamic>> syncInboundEmail() =>
+      _function('fetch-email', body: {'mailbox': 'INBOX', 'limit': 30});
+  Future<void> updateEmailMessageReadStatus(
+    String messageId,
+    bool isRead,
+  ) async {
+    try {
+      await _function(
+        'fetch-email',
+        body: {'action': 'set_read', 'id': messageId, 'is_read': isRead},
+      );
+    } catch (_) {
+      await _rest(
+        'email_messages',
+        method: 'PATCH',
+        query: {'id': 'eq.$messageId'},
+        body: {
+          'is_read': isRead,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        returnRepresentation: false,
+      );
+    }
+  }
+
   Future<void> upsertShippingCarrierCredentials(Map<String, dynamic> value) =>
       _upsertCredential(
         providerType: 'shipping_carrier',
@@ -1237,6 +1333,22 @@ class StoreDataGateway {
       );
     }
     return url;
+  }
+
+  Future<String> createStripeRefund({
+    required String orderNumber,
+    required double amount,
+    required String reason,
+  }) async {
+    final response = await _function(
+      'stripe-refund',
+      body: {'orderNumber': orderNumber, 'amount': amount, 'reason': reason},
+    );
+    final refundId = '${response['refundId'] ?? response['id'] ?? ''}'.trim();
+    if (refundId.isEmpty) {
+      throw StateError('Stripe refund did not return a refund id.');
+    }
+    return refundId;
   }
 
   Future<ShippingLabelResult> createUspsLabel({

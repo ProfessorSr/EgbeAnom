@@ -3,7 +3,7 @@
 # EgbeAnom Production Deployment Script
 # Usage: ./deploy-production.sh
 # Prerequisites: 
-#   - Set environment variables: SUPABASE_PROJECT_ID, ENCRYPTION_KEY, SENTRY_DSN
+#   - Set environment variables: SUPABASE_PROJECT_ID, ENCRYPTION_KEY
 #   - Install: flutter, supabase-cli, curl
 
 set -e
@@ -27,11 +27,6 @@ fi
 if [ -z "$ENCRYPTION_KEY" ]; then
   echo -e "${RED}❌ ENCRYPTION_KEY not set${NC}"
   echo "Generate with: openssl rand -hex 32"
-  exit 1
-fi
-
-if [ -z "$SENTRY_DSN" ]; then
-  echo -e "${RED}❌ SENTRY_DSN not set${NC}"
   exit 1
 fi
 
@@ -101,7 +96,6 @@ flutter analyze
 # Build for web
 echo "Building web release..."
 flutter build web --release \
-  --dart-define=SENTRY_DSN="$SENTRY_DSN" \
   --dart-define=ENCRYPTION_KEY="$ENCRYPTION_KEY"
 
 echo -e "${GREEN}✓ Web app built${NC}"
@@ -151,7 +145,6 @@ echo -e "${GREEN}✓ Verification complete${NC}"
 echo -e "\n${YELLOW}Deployment Summary${NC}"
 echo "===================="
 echo -e "Project: ${GREEN}$SUPABASE_PROJECT_ID${NC}"
-echo -e "Sentry DSN: ${GREEN}${SENTRY_DSN:0:30}...${NC}"
 echo -e "Encryption Key: ${GREEN}${ENCRYPTION_KEY:0:10}...${NC}"
 echo -e "Build Location: ${GREEN}egbeanom/build/web${NC}"
 
@@ -161,8 +154,7 @@ echo -e "\n${YELLOW}Next Steps:${NC}"
 echo "1. Upload egbeanom/build/web/* to your hosting"
 echo "2. Test app at https://your-domain.com"
 echo "3. Verify payment processing works"
-echo "4. Monitor Sentry dashboard for errors"
-echo "5. Check credential access logs weekly"
+echo "4. Check credential access logs weekly"
 
 echo -e "\n${YELLOW}Rollback if needed:${NC}"
 echo "  supabase db reset --project-id $SUPABASE_PROJECT_ID"

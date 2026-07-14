@@ -16,6 +16,9 @@ class ShopView extends StatelessWidget {
     required this.newsItems,
     required this.companyReviews,
     required this.siteStatus,
+    required this.customer,
+    required this.onJoinMailingList,
+    required this.onUpdateAccountMailingList,
   });
 
   final List<Fragrance> products;
@@ -31,6 +34,9 @@ class ShopView extends StatelessWidget {
   final List<NewsItem> newsItems;
   final List<ReviewSummary> companyReviews;
   final SiteStatus siteStatus;
+  final CustomerAccount? customer;
+  final Future<void> Function(String email) onJoinMailingList;
+  final Future<void> Function(bool subscribed) onUpdateAccountMailingList;
 
   @override
   Widget build(BuildContext context) {
@@ -144,12 +150,215 @@ class ShopView extends StatelessWidget {
                       showCompanyReviews: siteStatus.showCompanyReviews,
                       onOpenInfoPage: onOpenInfoPage,
                     ),
+                  if (siteStatus.showMailingListSignup) ...[
+                    const SizedBox(height: 18),
+                    _MailingListSignup(
+                      customer: customer,
+                      onJoinMailingList: onJoinMailingList,
+                      onUpdateAccountMailingList: onUpdateAccountMailingList,
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MailingListSignup extends StatefulWidget {
+  const _MailingListSignup({
+    required this.customer,
+    required this.onJoinMailingList,
+    required this.onUpdateAccountMailingList,
+  });
+
+  final CustomerAccount? customer;
+  final Future<void> Function(String email) onJoinMailingList;
+  final Future<void> Function(bool subscribed) onUpdateAccountMailingList;
+
+  @override
+  State<_MailingListSignup> createState() => _MailingListSignupState();
+}
+
+class _MailingListSignupState extends State<_MailingListSignup> {
+  final _email = TextEditingController();
+  bool _saving = false;
+  String _message = '';
+  late bool _accountSubscribed = widget.customer?.acceptsMarketing ?? false;
+
+  @override
+  void didUpdateWidget(covariant _MailingListSignup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.customer?.id != oldWidget.customer?.id ||
+        widget.customer?.acceptsMarketing !=
+            oldWidget.customer?.acceptsMarketing) {
+      _accountSubscribed = widget.customer?.acceptsMarketing ?? false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final email = _email.text.trim();
+    final error = Validators.validateEmail(email);
+    if (error != null) {
+      setState(() => _message = error);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _message = '';
+    });
+    try {
+      await widget.onJoinMailingList(email);
+      if (!mounted) {
+        return;
+      }
+      _email.clear();
+      setState(() => _message = 'You are on the list.');
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _message = 'Signup failed. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  Future<void> _toggleAccountSignup(bool value) async {
+    setState(() {
+      _saving = true;
+      _message = '';
+      _accountSubscribed = value;
+    });
+    try {
+      await widget.onUpdateAccountMailingList(value);
+      if (!mounted) {
+        return;
+      }
+      setState(
+        () => _message = value
+            ? 'You are on the account mailing list.'
+            : 'Mailing list updates turned off.',
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _accountSubscribed = !value;
+        _message = 'Mailing list update failed. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2DCD2)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 680;
+          final customer = widget.customer;
+          if (customer != null) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Stay connected', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(
+                  'Receive fragrance releases, offers, and store updates at ${customer.email}.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text('Send me mailing list updates'),
+                  value: _accountSubscribed,
+                  onChanged: _saving
+                      ? null
+                      : (value) => _toggleAccountSignup(value ?? false),
+                ),
+                if (_message.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(_message),
+                ],
+              ],
+            );
+          }
+          final input = TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
+            decoration: const InputDecoration(
+              labelText: 'Email address',
+              prefixIcon: Icon(Icons.mail_outline),
+            ),
+            onSubmitted: (_) => _saving ? null : _submit(),
+          );
+          final button = FilledButton.icon(
+            onPressed: _saving ? null : _submit,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.mark_email_read_outlined),
+            label: const Text('Join mailing list'),
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Stay connected', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 6),
+              Text(
+                'Receive fragrance releases, offers, and store updates.',
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              if (narrow)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [input, const SizedBox(height: 10), button],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(child: input),
+                    const SizedBox(width: 12),
+                    button,
+                  ],
+                ),
+              if (_message.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(_message),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 }
