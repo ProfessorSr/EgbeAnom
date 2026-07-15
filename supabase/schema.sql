@@ -608,6 +608,13 @@ create table if not exists public.store_customers (
   state text not null default '',
   postal_code text not null default '',
   country text not null default 'US',
+  billing_address_line1 text not null default '',
+  billing_address_line2 text not null default '',
+  billing_city text not null default '',
+  billing_county text not null default '',
+  billing_state text not null default '',
+  billing_postal_code text not null default '',
+  billing_country text not null default 'US',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -637,7 +644,14 @@ alter table public.store_customers
   add column if not exists county text not null default '',
   add column if not exists state text not null default '',
   add column if not exists postal_code text not null default '',
-  add column if not exists country text not null default 'US';
+  add column if not exists country text not null default 'US',
+  add column if not exists billing_address_line1 text not null default '',
+  add column if not exists billing_address_line2 text not null default '',
+  add column if not exists billing_city text not null default '',
+  add column if not exists billing_county text not null default '',
+  add column if not exists billing_state text not null default '',
+  add column if not exists billing_postal_code text not null default '',
+  add column if not exists billing_country text not null default 'US';
 
 create table if not exists public.mailing_list_subscribers (
   email text primary key,

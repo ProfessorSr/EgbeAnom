@@ -38,6 +38,7 @@ Do not ship an order unless its financial status says paid.
 - [Reviews](./Reviews.md) - Use this to approve survey and product reviews.
 - [Alerts](./Alerts.md) - Use this as the store notice board.
 - [Email](./Email.md) - Use this to set up SMTP email and send test emails.
+- [Live Chat](./Live%20Chat.md) - Use this to open or close storefront live-chat help and respond to customer requests.
 - [Site](./Site.md) - Use this to control public website settings.
 - [Store Info](./Store%20Info.md) - Use this to set the store name, address, phone, and email.
 - [Taxes](./Taxes.md) - Use this to manage state, county, city, other, VAT, and import tax rules.

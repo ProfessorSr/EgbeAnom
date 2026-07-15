@@ -5,7 +5,6 @@
   "scripts": {
     "apply-schema": "node scripts/apply-supabase-schema.js supabase/schema.sql",
     "build-web": "cd egbeanom && flutter build web --dart-define=SUPABASE_URL=${SUPABASE_URL:?Missing SUPABASE_URL} --dart-define=SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?Missing SUPABASE_ANON_KEY} --dart-define=SUPABASE_PRODUCT_BUCKET=${SUPABASE_PRODUCT_BUCKET:-product-images}",
-    "upload-supabase-product-images": "node scripts/upload-supabase-product-images.js",
     "smoke-test-carrier-labels": "node scripts/smoke-test-carrier-labels.js",
     "smoke-test-edge-functions": "node scripts/smoke-test-edge-functions.js"
   },

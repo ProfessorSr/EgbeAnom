@@ -183,10 +183,28 @@ async function handleCheckoutCompleted(
     throw new Error(`Supabase order update failed: ${error.message}`);
   }
 
-  await serviceClient.rpc('decrement_inventory_for_order', {
+  const { error: inventoryError } = await serviceClient.rpc('decrement_inventory_for_order', {
     p_order_number: orderNumber,
     p_email: asString(order.email),
   });
+  if (inventoryError) {
+    throw new Error(`Inventory update failed: ${inventoryError.message}`);
+  }
+
+  await serviceClient.from('active_carts').update({
+    status: 'recovered',
+    recovered_at: new Date().toISOString(),
+    last_seen_at: new Date().toISOString(),
+  }).eq('customer_email', asString(order.email).trim().toLowerCase()).eq('status', 'active');
+
+  await serviceClient.from('admin_notifications').upsert({
+    id: `N-order-paid-${orderNumber}`,
+    type: 'payment',
+    title: 'Order paid',
+    message: `${orderNumber} was paid successfully and is ready for fulfillment.`,
+    is_read: false,
+    created_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
 
   return {
     orderNumber,

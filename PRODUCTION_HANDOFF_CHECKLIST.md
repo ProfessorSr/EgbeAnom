@@ -48,7 +48,7 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Success page shows order details
 - [x] Survey shows after payment
 - [~] Cancel and failed payment paths need one final manual check
-- ⚠️ One small live payment through the active payment processor, currently Stripe, has been completed
+- [ ] ⚠️ One small live payment through the active payment processor, currently Stripe, has been completed
 
 ## Orders And Fulfillment
 
@@ -113,7 +113,7 @@ The lower commercial-platform score is not a launch blocker. It means this custo
 - [x] Carrier options exist
 - [x] Address-label fallback exists
 - [x] Store can launch without live carrier processors by using flat-rate shipping and address-label printing
-- ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL if the client chooses carrier label buying inside the site
+- [ ] ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL if the client chooses carrier label buying inside the site
 
 ## Reports
 
@@ -161,7 +161,7 @@ These items came from the production-readiness audit. Keep them here until each 
 - [x] Confirm all production indexes are applied to the live database.
 - [x] Add server-side pagination/filtering for orders, customers, products, reviews, and reports.
 - [x] Add address validation before shipping labels are purchased.
-- ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL labels with real or sandbox carrier credentials if the client chooses live carrier processors. Use `npm run smoke-test-carrier-labels` after credentials are configured.
+- [ ] ⚠️ Optional add-on: live-test USPS, UPS, FedEx, or DHL labels with real or sandbox carrier credentials if the client chooses live carrier processors. Use `npm run smoke-test-carrier-labels` after credentials are configured.
 - [x] Add tracking status refresh or carrier webhook support where available.
 - [x] Add password reset and account verification test coverage.
 - [x] Add stronger audit logging for admin changes to products, prices, stock, orders, taxes, payment settings, shipping settings, and credentials.
@@ -200,8 +200,8 @@ Keep the launch checklist focused on what is needed to hand off and go live. Use
 
 Before public launch, finish these:
 
-- ⚠️ live payment test through the active payment processor, currently Stripe
+- [ ] ⚠️ live payment test through the active payment processor, currently Stripe
 - [~] final SMTP send and inbox sync after deployment
-- ⚠️ optional carrier label test only if carrier processors are part of launch
-- ⚠️ final tax rate review
-- ⚠️ final owner walkthrough
+- [ ] ⚠️ optional carrier label test only if carrier processors are part of launch
+- [ ] ⚠️ final tax rate review
+- [ ] ⚠️ final owner walkthrough

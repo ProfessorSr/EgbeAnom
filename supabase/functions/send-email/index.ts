@@ -33,6 +33,7 @@ Deno.serve(async (request: Request) => {
     }
 
     const body = asObject(await request.json());
+    const requestedAccount = asString(body.account_id || body.accountEmail || body.fromEmail).trim();
     const kind = asString(body.kind).trim();
     const subject = asString(body.subject).trim();
     const htmlBody = asString(body.htmlBody);
@@ -66,7 +67,7 @@ Deno.serve(async (request: Request) => {
       return json({ error: 'Unsupported email kind.' }, 400, headers);
     }
 
-    const settings = await fetchEmailSettings();
+    const settings = await fetchEmailSettings(requestedAccount);
     const directSsl = shouldUseDirectSsl(settings);
     const nodemailer = await loadMailer();
     const transporter = nodemailer.createTransport({
@@ -140,7 +141,8 @@ async function loadMailer(): Promise<{
   }
 }
 
-async function fetchEmailSettings(): Promise<{
+async function fetchEmailSettings(requestedAccount = ''): Promise<{
+  id: string;
   fromName: string;
   fromEmail: string;
   smtpHost: string;
@@ -151,7 +153,7 @@ async function fetchEmailSettings(): Promise<{
 }> {
   const encrypted = await fetchEncryptedCredential('email_server', 'default');
   if (encrypted) {
-    return normalizeEmailSettings(encrypted);
+    return selectEmailAccount(encrypted, requestedAccount);
   }
 
   const { data, error } = await serviceClient!
@@ -162,10 +164,11 @@ async function fetchEmailSettings(): Promise<{
   if (error) {
     throw new Error(`Email settings lookup failed: ${error.message}`);
   }
-  return normalizeEmailSettings(asObject(data?.value));
+  return selectEmailAccount(asObject(data?.value), requestedAccount);
 }
 
 function normalizeEmailSettings(value: Json): {
+  id: string;
   fromName: string;
   fromEmail: string;
   smtpHost: string;
@@ -183,6 +186,7 @@ function normalizeEmailSettings(value: Json): {
     throw new Error('From email is not configured.');
   }
   return {
+    id: asString(value.id).trim() || accountIdFor(fromEmail),
     fromName: asString(value.from_name).trim() || 'EgbeAnom',
     fromEmail,
     smtpHost,
@@ -191,6 +195,46 @@ function normalizeEmailSettings(value: Json): {
     password: asString(value.password),
     useSsl: value.use_ssl === true,
   };
+}
+
+function selectEmailAccount(value: Json, requestedAccount = ''): {
+  id: string;
+  fromName: string;
+  fromEmail: string;
+  smtpHost: string;
+  smtpPort: number;
+  username: string;
+  password: string;
+  useSsl: boolean;
+} {
+  const accountsValue = Array.isArray(value.accounts) ? value.accounts : [];
+  const accounts = accountsValue
+    .map((account) => normalizeEmailSettings(asObject(account)))
+    .filter((account) => account.fromEmail);
+  if (accounts.length === 0) {
+    return normalizeEmailSettings(value);
+  }
+  const requested = requestedAccount.trim().toLowerCase();
+  if (requested) {
+    const match = accounts.find((account) =>
+      account.id.toLowerCase() === requested ||
+      account.fromEmail.toLowerCase() === requested ||
+      account.username.toLowerCase() === requested
+    );
+    if (match) {
+      return match;
+    }
+  }
+  const defaultId = asString(value.default_account_id).trim().toLowerCase();
+  return accounts.find((account) => account.id.toLowerCase() === defaultId) ?? accounts[0];
+}
+
+function accountIdFor(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'default';
 }
 
 async function fetchEncryptedCredential(

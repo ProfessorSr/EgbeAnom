@@ -103,14 +103,18 @@ String _buildPrintDocument(String title, String htmlContents) {
       .egbeanom-print-page {
         display: block;
         width: 8.5in;
-        height: 11in;
+        height: 10.95in;
         box-sizing: border-box;
-        overflow: visible;
+        overflow: hidden;
         margin: 0;
         break-inside: avoid;
         page-break-inside: avoid;
         break-after: page;
         page-break-after: always;
+      }
+      .egbeanom-print-page + .egbeanom-print-page {
+        break-before: page;
+        page-break-before: always;
       }
       .egbeanom-print-page:last-child {
         break-after: auto;

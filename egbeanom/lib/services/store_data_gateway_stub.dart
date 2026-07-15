@@ -170,12 +170,19 @@ class StoreDataGateway {
     String textBody = '',
     String orderId = '',
     String event = '',
+    String accountId = '',
   }) async => {'sent': recipients.length};
-  Future<Map<String, dynamic>> syncInboundEmail() async => {'imported': 0};
+  Future<Map<String, dynamic>> syncInboundEmail({
+    String accountId = '',
+  }) async => {'imported': 0};
   Future<void> updateEmailMessageReadStatus(
     String messageId,
-    bool isRead,
-  ) async {}
+    bool isRead, {
+    String serverMessageId = '',
+    String mailbox = 'INBOX',
+    String accountId = '',
+    int serverUid = 0,
+  }) async {}
   Future<void> upsertShippingCarrierCredentials(
     Map<String, dynamic> value,
   ) async {}

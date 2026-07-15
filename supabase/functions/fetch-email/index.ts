@@ -37,9 +37,10 @@ Deno.serve(async (request: Request) => {
 
     const body = asObject(await request.json().catch(() => ({})));
     let mailbox = asString(body.mailbox).trim() || 'INBOX';
+    const requestedAccount = asString(body.account_id || body.account_email).trim();
     const action = asString(body.action).trim().toLowerCase();
     const limit = Math.min(Math.max(asNumber(body.limit) || 30, 1), 75);
-    const settings = await fetchEmailSettings();
+    const settings = await fetchEmailSettings(requestedAccount);
     if (!settings.imapHost) {
       throw new Error('IMAP host is not configured.');
     }
@@ -65,17 +66,9 @@ Deno.serve(async (request: Request) => {
       let messageId = asString(body.message_id).trim();
       const rowId = asString(body.id).trim();
       const isRead = body.is_read === true;
-      if (!messageId && rowId) {
-        const { data, error } = await serviceClient
-          .from('email_messages')
-          .select('message_id,mailbox')
-          .eq('id', rowId)
-          .maybeSingle();
-        if (error) {
-          throw new Error(`Email message lookup failed: ${error.message}`);
-        }
-        messageId = asString(data?.message_id).trim();
-        mailbox = asString(data?.mailbox).trim() || mailbox;
+      const requestedUid = asNumber(body.uid);
+      if (!messageId) {
+        messageId = rowId;
       }
       if (!messageId) {
         throw new Error('Message ID is required to update read status.');
@@ -83,7 +76,9 @@ Deno.serve(async (request: Request) => {
       await client.connect();
       const lock = await client.getMailboxLock(mailbox);
       try {
-        const uid = await findMessageUid(client, mailbox, messageId, 250);
+        const uid = requestedUid > 0
+          ? requestedUid
+          : await findMessageUid(client, mailbox, messageId, 75);
         if (uid !== null) {
           if (isRead) {
             await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
@@ -95,20 +90,10 @@ Deno.serve(async (request: Request) => {
         lock.release();
         await client.logout().catch(() => undefined);
       }
-      const query = serviceClient
-        .from('email_messages')
-        .update({ is_read: isRead, updated_at: new Date().toISOString() });
-      const { error } = rowId
-        ? await query.eq('id', rowId)
-        : await query.eq('message_id', messageId);
-      if (error) {
-        throw new Error(`Email read status save failed: ${error.message}`);
-      }
       return json({ updated: true, serverUpdated: true }, 200, headers);
     }
 
     await client.connect();
-    let imported = 0;
     const rows: Json[] = [];
     const lock = await client.getMailboxLock(mailbox);
     try {
@@ -138,9 +123,12 @@ Deno.serve(async (request: Request) => {
             .slice(0, 240) || stripHtml(html).slice(0, 240);
           const orderNumber = orderNumberFromText(`${subject}\n${text}\n${html}`);
           rows.push({
-            id: stableId(messageId),
+            id: stableId(`${settings.id}:${messageId}`),
+            account_id: settings.id,
+            account_email: settings.fromEmail,
             mailbox,
             message_id: messageId,
+            server_uid: message.uid,
             from_email: `${from.address || ''}`.trim().toLowerCase(),
             from_name: `${from.name || ''}`.trim(),
             to_email: `${to.address || settings.fromEmail}`.trim().toLowerCase(),
@@ -154,9 +142,7 @@ Deno.serve(async (request: Request) => {
                 : parsed.date instanceof Date
                 ? parsed.date
                 : new Date()).toISOString(),
-            is_read: Array.isArray(message.flags)
-              ? message.flags.includes('\\Seen')
-              : false,
+            is_read: hasFlag(message.flags, '\\Seen'),
             order_number: orderNumber,
           });
         }
@@ -166,45 +152,21 @@ Deno.serve(async (request: Request) => {
       await client.logout().catch(() => undefined);
     }
 
-    if (rows.length > 0) {
-      const messageIds = rows
-        .map((row) => asString(row.message_id))
-        .filter((value) => value.trim().length > 0);
-      if (messageIds.length > 0) {
-        const { data: existing, error: existingError } = await serviceClient
-          .from('email_messages')
-          .select('message_id,is_read')
-          .in('message_id', messageIds);
-        if (existingError) {
-          throw new Error(`Existing email read-state lookup failed: ${existingError.message}`);
-        }
-        const readState = new Map(
-          (existing ?? []).map((item: Json) => [
-            asString(item.message_id),
-            item.is_read === true,
-          ]),
-        );
-        for (const row of rows) {
-          const existingRead = readState.get(asString(row.message_id));
-          if (existingRead !== undefined) {
-            row.is_read = existingRead;
-          }
-        }
-      }
-      const { error } = await serviceClient
-        .from('email_messages')
-        .upsert(rows, { onConflict: 'message_id' });
-      if (error) {
-        throw new Error(`Email message save failed: ${error.message}`);
-      }
-      imported = rows.length;
-    }
-
-    return json({ imported, scanned: rows.length }, 200, headers);
+    return json({ imported: rows.length, scanned: rows.length, messages: rows }, 200, headers);
   } catch (error) {
     return json({ error: errorMessage(error) || 'Inbox sync failed.' }, 400, headers);
   }
 });
+
+function hasFlag(flags: unknown, expected: string): boolean {
+  if (Array.isArray(flags)) {
+    return flags.includes(expected);
+  }
+  if (flags && typeof flags === 'object' && Symbol.iterator in flags) {
+    return Array.from(flags as Iterable<unknown>).includes(expected);
+  }
+  return false;
+}
 
 async function findMessageUid(
   client: ImapFlow,
@@ -231,7 +193,8 @@ async function findMessageUid(
   return null;
 }
 
-async function fetchEmailSettings(): Promise<{
+async function fetchEmailSettings(requestedAccount = ''): Promise<{
+  id: string;
   fromEmail: string;
   imapHost: string;
   imapPort: number;
@@ -241,7 +204,7 @@ async function fetchEmailSettings(): Promise<{
 }> {
   const encrypted = await fetchEncryptedCredential('email_server', 'default');
   if (encrypted) {
-    return normalizeEmailSettings(encrypted);
+    return selectEmailAccount(encrypted, requestedAccount);
   }
 
   const { data, error } = await serviceClient!
@@ -252,10 +215,11 @@ async function fetchEmailSettings(): Promise<{
   if (error) {
     throw new Error(`Email settings lookup failed: ${error.message}`);
   }
-  return normalizeEmailSettings(asObject(data?.value));
+  return selectEmailAccount(asObject(data?.value), requestedAccount);
 }
 
 function normalizeEmailSettings(value: Json): {
+  id: string;
   fromEmail: string;
   imapHost: string;
   imapPort: number;
@@ -264,6 +228,7 @@ function normalizeEmailSettings(value: Json): {
   useSsl: boolean;
 } {
   return {
+    id: asString(value.id).trim() || accountIdFor(asString(value.from_email)),
     fromEmail: asString(value.from_email).trim(),
     imapHost: asString(value.imap_host).trim(),
     imapPort: asNumber(value.imap_port) || 993,
@@ -271,6 +236,45 @@ function normalizeEmailSettings(value: Json): {
     password: asString(value.password),
     useSsl: value.use_ssl === true,
   };
+}
+
+function selectEmailAccount(value: Json, requestedAccount = ''): {
+  id: string;
+  fromEmail: string;
+  imapHost: string;
+  imapPort: number;
+  username: string;
+  password: string;
+  useSsl: boolean;
+} {
+  const accountsValue = Array.isArray(value.accounts) ? value.accounts : [];
+  const accounts = accountsValue
+    .map((account) => normalizeEmailSettings(asObject(account)))
+    .filter((account) => account.fromEmail || account.username);
+  if (accounts.length === 0) {
+    return normalizeEmailSettings(value);
+  }
+  const requested = requestedAccount.trim().toLowerCase();
+  if (requested) {
+    const match = accounts.find((account) =>
+      account.id.toLowerCase() === requested ||
+      account.fromEmail.toLowerCase() === requested ||
+      account.username.toLowerCase() === requested
+    );
+    if (match) {
+      return match;
+    }
+  }
+  const defaultId = asString(value.default_account_id).trim().toLowerCase();
+  return accounts.find((account) => account.id.toLowerCase() === defaultId) ?? accounts[0];
+}
+
+function accountIdFor(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'default';
 }
 
 async function fetchEncryptedCredential(

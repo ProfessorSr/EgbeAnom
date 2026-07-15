@@ -159,15 +159,9 @@ Before launch, test each live carrier account that will be used.
 
 ## Product Images
 
-Product images are stored in the configured Supabase storage bucket.
+Product images are stored in the configured Supabase storage bucket and should be managed from the admin product editor.
 
-The upload helper is:
-
-```sh
-node scripts/upload-supabase-product-images.js
-```
-
-Use a service role key or another approved admin credential when running image upload scripts.
+Old one-time upload and seed helpers were removed for handoff so they cannot overwrite the live catalog by accident.
 
 ## Handoff Rule
 

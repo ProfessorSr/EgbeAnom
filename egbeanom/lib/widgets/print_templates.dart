@@ -141,7 +141,7 @@ String _addressLabelHtml(Order order, String carrier, StoreInfo storeInfo) {
     @media print {
       .address-label-doc {
         width: 8.5in !important;
-        height: 11in !important;
+        height: 10.95in !important;
         margin: 0 !important;
         overflow: hidden !important;
       }
@@ -288,7 +288,7 @@ String _invoiceHtml(
     @media print {
       .invoice-doc {
         width: 8.5in !important;
-        height: 11in !important;
+        height: 10.95in !important;
         max-width: none !important;
         margin: 0 !important;
         border-width: 1px !important;

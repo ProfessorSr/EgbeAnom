@@ -12,6 +12,8 @@ class _StoreShellState extends State<StoreShell> {
   StoreView _view = StoreView.shop;
   StreamSubscription<String>? _browserRouteSubscription;
   Timer? _adminNotificationPollTimer;
+  int _busyOperationCount = 0;
+  String _busyMessage = 'Updating...';
   bool _pollingAdminAttention = false;
   String _lastBrowserRoute = '/';
   bool _accountStartsCreating = false;
@@ -72,6 +74,7 @@ class _StoreShellState extends State<StoreShell> {
   final List<ReviewSummary> _companyReviews = [];
   final SiteStatus _siteStatus = SiteStatus();
   final EmailServerSettings _emailSettings = EmailServerSettings();
+  String _selectedEmailAccountId = 'default';
   final Map<String, ShippingCarrierCredentials> _shippingCredentials = {
     'USPS': const ShippingCarrierCredentials(),
     'UPS': const ShippingCarrierCredentials(),
@@ -337,10 +340,6 @@ class _StoreShellState extends State<StoreShell> {
       _gateway.fetchMailingListSubscribers,
       [],
     );
-    final emailMessages = await fallback<List<Map<String, dynamic>>>(
-      _gateway.fetchEmailMessages,
-      [],
-    );
     final siteStatus = await fallback<Map<String, dynamic>?>(
       _gateway.fetchSiteStatus,
       null,
@@ -494,11 +493,6 @@ class _StoreShellState extends State<StoreShell> {
           ..clear()
           ..addAll(mailingListSubscribers.map(MailingListSubscriber.fromRow));
       }
-      if (emailMessages.isNotEmpty) {
-        _emailMessages
-          ..clear()
-          ..addAll(emailMessages.map(EmailMessage.fromRow));
-      }
       if (reviews.isNotEmpty) {
         final loadedReviews = reviews.map(ReviewSummary.fromRow).toList();
         _productReviews
@@ -562,6 +556,7 @@ class _StoreShellState extends State<StoreShell> {
           ..showCommunity = status.showCommunity
           ..showCompanyReviews = status.showCompanyReviews
           ..showMailingListSignup = status.showMailingListSignup
+          ..showLiveChat = status.showLiveChat
           ..homeShelfMode = status.homeShelfMode
           ..featuredProductIds = List.of(status.featuredProductIds)
           ..returnPolicy = status.returnPolicy
@@ -572,6 +567,8 @@ class _StoreShellState extends State<StoreShell> {
       if (emailSettings != null) {
         final settings = EmailServerSettings.fromRow(emailSettings);
         _emailSettings
+          ..id = settings.id
+          ..label = settings.label
           ..provider = settings.provider
           ..fromName = settings.fromName
           ..fromEmail = settings.fromEmail
@@ -581,7 +578,11 @@ class _StoreShellState extends State<StoreShell> {
           ..smtpPort = settings.smtpPort
           ..username = settings.username
           ..password = settings.password
-          ..useSsl = settings.useSsl;
+          ..useSsl = settings.useSsl
+          ..accounts = settings.allAccounts.map((account) {
+            return account.copyWithoutAccounts();
+          }).toList();
+        _selectedEmailAccountId = _emailSettings.id;
       }
       final legacyValue =
           shippingCredentials != null && shippingCredentials['value'] is Map
@@ -1005,11 +1006,9 @@ class _StoreShellState extends State<StoreShell> {
   }
 
   double get _shippingBeforeDiscount =>
-      _cartSubtotal > 125 || _cartSubtotal == 0
+      _cartSubtotal == 0 || _enabledShippingOptions.isEmpty
       ? 0
-      : (_enabledShippingOptions.isEmpty
-            ? 0
-            : _shippingForOption(_selectedShippingOption));
+      : _shippingForOption(_selectedShippingOption);
 
   double _shippingForOption(ShippingOption option) {
     return option.chargeType == 'per_item'
@@ -3035,17 +3034,6 @@ class _StoreShellState extends State<StoreShell> {
         if (event != null) {
           unawaited(_sendOrderEmail(order, event));
         }
-        _notifications.insert(
-          0,
-          StoreNotification(
-            id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}',
-            type: 'email',
-            title: 'Order update email queued',
-            message:
-                '${order.id} ${fulfillmentStatus.toLowerCase()} notice queued for ${order.email}.',
-            createdAt: DateTime.now(),
-          ),
-        );
         saves.add(_gateway.upsertOrder(_orderRow(order)));
       }
     });
@@ -3258,20 +3246,6 @@ class _StoreShellState extends State<StoreShell> {
         if (result.postage > 0) {
           order.shippingTotal = result.postage;
         }
-        if (result.estimatedDays.trim().isNotEmpty) {
-          _notifications.insert(
-            0,
-            StoreNotification(
-              id: 'N-${DateTime.now().millisecondsSinceEpoch}-${order.id}-label',
-              type: 'shipping',
-              title: '$carrier label created',
-              message: result.trackingNumber.trim().isNotEmpty
-                  ? '${order.id} $carrier label created for ${result.trackingNumber} (${result.estimatedDays}).'
-                  : '${order.id} address label created (${result.estimatedDays}).',
-              createdAt: DateTime.now(),
-            ),
-          );
-        }
       });
       await _gateway.upsertOrder(_orderRow(order));
       unawaited(_sendOrderEmail(order, 'label_created'));
@@ -3423,18 +3397,6 @@ class _StoreShellState extends State<StoreShell> {
         } else {
           review.status = status;
         }
-        _notifications.insert(
-          0,
-          StoreNotification(
-            id: 'N-${DateTime.now().millisecondsSinceEpoch}',
-            type: 'review',
-            title: isDeleteAction ? 'Review deleted' : 'Review $status',
-            message: isDeleteAction
-                ? '${review.author} review was deleted.'
-                : '${review.author} review marked $status.',
-            createdAt: DateTime.now(),
-          ),
-        );
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -3447,65 +3409,89 @@ class _StoreShellState extends State<StoreShell> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        review.status = previousStatus;
-        _notifications.insert(
-          0,
-          StoreNotification(
-            id: 'N-${DateTime.now().millisecondsSinceEpoch}',
-            type: 'review',
-            title: 'Review update failed',
-            message: '$error',
-            createdAt: DateTime.now(),
-          ),
-        );
-      });
+      setState(() => review.status = previousStatus);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Review update failed: $error')));
     }
   }
 
-  void _sendCustomerEmail(String audience, String subject, String body) {
-    unawaited(_sendManualCustomerEmail(audience, subject, body));
+  void _sendCustomerEmail(
+    String audience,
+    String subject,
+    String body,
+    String accountId,
+  ) {
+    unawaited(_sendManualCustomerEmail(audience, subject, body, accountId));
   }
 
-  Future<void> _syncInboundEmail() async {
+  Future<void> _syncInboundEmail([String accountId = '']) async {
+    _beginBusy('Syncing email...');
     try {
-      final result = await _gateway.syncInboundEmail();
-      final rows = await _gateway.fetchEmailMessages();
+      final selectedAccount = accountId.trim().isNotEmpty
+          ? accountId.trim()
+          : _selectedEmailAccountId;
+      final result = await _gateway.syncInboundEmail(
+        accountId: selectedAccount,
+      );
+      final resultRows = result['messages'];
+      final rows = resultRows is List
+          ? resultRows
+                .whereType<Map>()
+                .map((row) => row.cast<String, dynamic>())
+                .toList()
+          : <Map<String, dynamic>>[];
       if (!mounted) {
         return;
       }
       setState(() {
         _emailMessages
-          ..clear()
+          ..removeWhere((message) => message.accountId == selectedAccount)
           ..addAll(rows.map(EmailMessage.fromRow));
+        _emailMessages.sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
       });
       final imported = result['imported'] ?? result['synced'] ?? 0;
-      _showStatusSnack('Inbox synced. $imported new message(s).');
+      _showStatusSnack('Inbox synced. $imported message(s) loaded.');
     } catch (error) {
       _showStatusSnack('Inbox sync failed: $error');
+    } finally {
+      _endBusy();
     }
   }
 
-  void _markEmailMessageRead(EmailMessage message, bool isRead) {
+  Future<void> _markEmailMessageRead(EmailMessage message, bool isRead) async {
+    final previous = message.isRead;
     setState(() => message.isRead = isRead);
-    unawaited(
-      _gateway
-          .updateEmailMessageReadStatus(message.id, isRead)
-          .catchError((_) {}),
-    );
+    try {
+      await _gateway.updateEmailMessageReadStatus(
+        message.id,
+        isRead,
+        serverMessageId: message.messageId,
+        mailbox: message.mailbox,
+        accountId: message.accountId,
+        serverUid: message.serverUid,
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => message.isRead = previous);
+        _showStatusSnack(
+          'Could not update read status on the mail server: $error',
+        );
+      }
+    }
   }
 
   Future<void> _sendManualCustomerEmail(
     String audience,
     String subject,
     String body,
+    String accountId,
   ) async {
+    _beginBusy('Sending email...');
     final recipients = _emailRecipientsForAudience(audience);
     if (recipients.isEmpty) {
       _showStatusSnack('No email recipients found for $audience.');
+      _endBusy();
       return;
     }
     try {
@@ -3519,10 +3505,9 @@ class _StoreShellState extends State<StoreShell> {
         subject: subject.trim().isEmpty ? 'EgbeAnom update' : subject.trim(),
         htmlBody: htmlBody,
         textBody: _plainTextFromHtml(htmlBody),
-      );
-      _recordEmailNotification(
-        title: 'Email sent',
-        message: '$subject sent to ${recipients.length} recipient(s).',
+        accountId: accountId.trim().isNotEmpty
+            ? accountId.trim()
+            : _selectedEmailAccountId,
       );
       _showStatusSnack('Email sent to ${recipients.length} recipient(s).');
     } catch (error) {
@@ -3531,6 +3516,8 @@ class _StoreShellState extends State<StoreShell> {
         message: '$subject failed for $audience: $error',
       );
       _showStatusSnack('Email send failed: $error');
+    } finally {
+      _endBusy();
     }
   }
 
@@ -3649,10 +3636,6 @@ class _StoreShellState extends State<StoreShell> {
         textBody: _plainTextFromHtml(htmlBody),
         orderId: order.id,
         event: event,
-      );
-      _recordEmailNotification(
-        title: 'Customer email sent',
-        message: '$subject sent to ${order.email}.',
       );
     } catch (error) {
       _recordEmailNotification(
@@ -3802,24 +3785,26 @@ class _StoreShellState extends State<StoreShell> {
     required String bodyHtml,
   }) {
     final storeName = htmlEscape.convert(_storeInfo.displayName);
+    final appOrigin = Uri.base.hasScheme && Uri.base.host.isNotEmpty
+        ? Uri.base.origin
+        : '';
     final logoUrl = htmlEscape.convert(_storeInfo.logoUrl.trim());
-    final logoHtml = logoUrl.isEmpty
-        ? ''
-        : '<td class="email-logo-cell"><img class="email-logo" src="$logoUrl" alt="$storeName logo"></td>';
-    final contact = [_storeInfo.email, _storeInfo.phone]
+    final resolvedLogoUrl = logoUrl.isNotEmpty
+        ? logoUrl
+        : appOrigin.isEmpty
+        ? 'assets/assets/images/logo.png'
+        : '$appOrigin/assets/assets/images/logo.png';
+    final logoHtml =
+        '<td class="email-logo-cell"><img class="email-logo" src="$resolvedLogoUrl" alt="$storeName logo"></td>';
+    final contact = ['support@egbeanom.com', _storeInfo.phone]
         .where((item) => item.trim().isNotEmpty)
         .map(htmlEscape.convert)
         .join(' • ');
     final address = _emailFooterAddress();
-    final unsubscribeEmail = _storeInfo.email.trim().isEmpty
-        ? 'support@egbeanom.com'
-        : _storeInfo.email.trim();
+    const unsubscribeEmail = 'support@egbeanom.com';
     final unsubscribeHref =
         'mailto:${Uri.encodeComponent(unsubscribeEmail)}'
         '?subject=${Uri.encodeComponent('Unsubscribe from EgbeAnom emails')}';
-    final appOrigin = Uri.base.hasScheme && Uri.base.host.isNotEmpty
-        ? Uri.base.origin
-        : '';
     final qrCodeUrl = appOrigin.isEmpty
         ? 'assets/assets/images/egbeanom_qr_code.png'
         : '$appOrigin/assets/assets/images/egbeanom_qr_code.png';
@@ -3833,14 +3818,16 @@ class _StoreShellState extends State<StoreShell> {
     <style>
       body { margin: 0; padding: 0; background: #f7f2e8; color: #121212; font-family: Arial, sans-serif; }
       .preheader { display: none; max-height: 0; overflow: hidden; opacity: 0; color: transparent; }
-      .email-doc { max-width: 840px; margin: 0 auto; background: #fff; border: 1px solid #b7892f; }
+      .email-doc { width: 100%; max-width: 1220px; margin: 0 auto; background: #fff; border: 1px solid #b7892f; position: relative; overflow: hidden; }
+      .email-watermark { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: .06; filter: grayscale(1); pointer-events: none; }
+      .email-top, .email-body, .email-footer { position: relative; z-index: 1; }
       .email-top { background: #fff; color: #121212; padding: 30px 38px 24px; border-bottom: 3px solid #d3a13c; }
       .email-brand-table { width: 100%; border-collapse: collapse; }
       .email-brand-table td { vertical-align: middle; padding: 0; }
       .email-brand { font-family: Georgia, 'Times New Roman', serif; font-size: 42px; line-height: 1; font-weight: 400; margin: 0; }
       .email-tagline { color: #333; font-family: Georgia, 'Times New Roman', serif; font-size: 17px; line-height: 1.35; margin: 10px 0 0; }
-      .email-logo-cell { width: 112px; text-align: right; padding-left: 18px !important; }
-      .email-logo { display: inline-block; width: 96px; max-width: 96px; height: auto; border: 0; }
+      .email-logo-cell { width: 170px; text-align: right; padding-left: 18px !important; }
+      .email-logo { display: inline-block; width: 150px; max-width: 150px; height: auto; border: 0; }
       .email-body { padding: 34px 42px; }
       .email-title { color: #b8842b; text-transform: uppercase; letter-spacing: 1px; font-size: 22px; margin: 0 0 14px; }
       .email-intro { font-size: 16px; line-height: 1.5; margin: 0 0 18px; }
@@ -3877,6 +3864,7 @@ class _StoreShellState extends State<StoreShell> {
   <body>
     <div class="preheader">$safePreheader</div>
     <div class="email-doc">
+      <img class="email-watermark" src="$resolvedLogoUrl" alt="">
       <div class="email-top">
         <table class="email-brand-table" role="presentation">
           <tr>
@@ -3996,6 +3984,8 @@ class _StoreShellState extends State<StoreShell> {
   Future<void> _updateEmailSettings(EmailServerSettings settings) async {
     setState(() {
       _emailSettings
+        ..id = settings.id
+        ..label = settings.label
         ..provider = settings.provider
         ..fromName = settings.fromName
         ..fromEmail = settings.fromEmail
@@ -4005,7 +3995,11 @@ class _StoreShellState extends State<StoreShell> {
         ..smtpPort = settings.smtpPort
         ..username = settings.username
         ..password = settings.password
-        ..useSsl = settings.useSsl;
+        ..useSsl = settings.useSsl
+        ..accounts = settings.allAccounts.map((account) {
+          return account.copyWithoutAccounts();
+        }).toList();
+      _selectedEmailAccountId = _emailSettings.id;
     });
     try {
       await _gateway.upsertEmailServerSettings(_emailSettings.toJson());
@@ -4058,6 +4052,7 @@ class _StoreShellState extends State<StoreShell> {
       showCommunity: _siteStatus.showCommunity,
       showCompanyReviews: _siteStatus.showCompanyReviews,
       showMailingListSignup: _siteStatus.showMailingListSignup,
+      showLiveChat: _siteStatus.showLiveChat,
       homeShelfMode: _siteStatus.homeShelfMode,
       featuredProductIds: List.of(_siteStatus.featuredProductIds),
       returnPolicy: _siteStatus.returnPolicy,
@@ -4076,6 +4071,7 @@ class _StoreShellState extends State<StoreShell> {
         ..showCommunity = status.showCommunity
         ..showCompanyReviews = status.showCompanyReviews
         ..showMailingListSignup = status.showMailingListSignup
+        ..showLiveChat = status.showLiveChat
         ..homeShelfMode = status.homeShelfMode
         ..featuredProductIds = List.of(status.featuredProductIds)
         ..returnPolicy = status.returnPolicy
@@ -4099,6 +4095,7 @@ class _StoreShellState extends State<StoreShell> {
             ..showCommunity = previous.showCommunity
             ..showCompanyReviews = previous.showCompanyReviews
             ..showMailingListSignup = previous.showMailingListSignup
+            ..showLiveChat = previous.showLiveChat
             ..homeShelfMode = previous.homeShelfMode
             ..featuredProductIds = List.of(previous.featuredProductIds)
             ..returnPolicy = previous.returnPolicy
@@ -4802,6 +4799,21 @@ class _StoreShellState extends State<StoreShell> {
     );
   }
 
+  void _beginBusy(String message) {
+    if (!mounted) return;
+    setState(() {
+      _busyOperationCount += 1;
+      _busyMessage = message;
+    });
+  }
+
+  void _endBusy() {
+    if (!mounted) return;
+    setState(() {
+      _busyOperationCount = math.max(0, _busyOperationCount - 1);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     _scheduleBrowserRouteSync();
@@ -4883,7 +4895,50 @@ class _StoreShellState extends State<StoreShell> {
           const SizedBox(width: 12),
         ],
       ),
-      body: SafeArea(child: _activeView()),
+      body: Stack(
+        children: [
+          SafeArea(child: _activeView()),
+          if (_siteStatus.showLiveChat && _currentBackendUser == null)
+            Positioned(
+              right: 18,
+              bottom: 18,
+              child: _LiveChatHelp(
+                customerName: _currentCustomer?.name ?? '',
+                customerEmail: _currentCustomer?.email ?? '',
+                onSend: (name, email, message) => _sendContactMessage(
+                  name,
+                  email,
+                  'Live chat help request',
+                  message,
+                ),
+              ),
+            ),
+          if (_busyOperationCount > 0)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black45,
+                child: Center(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 28,
+                        vertical: 22,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 14),
+                          Text(_busyMessage),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -4987,6 +5042,21 @@ class _StoreShellState extends State<StoreShell> {
           checkoutEmail: _checkoutEmail,
           checkoutPhone: _checkoutPhone,
           shippingAddress: _checkoutShippingAddress,
+          billingAddress: _currentCustomer == null
+              ? ShippingAddress()
+              : ShippingAddress(
+                  firstName: _currentCustomer!.name.split(' ').first,
+                  lastName: _currentCustomer!.name.split(' ').skip(1).join(' '),
+                  addressLine1: _currentCustomer!.billingAddressLine1,
+                  addressLine2: _currentCustomer!.billingAddressLine2,
+                  city: _currentCustomer!.billingCity,
+                  county: _currentCustomer!.billingCounty,
+                  state: _currentCustomer!.billingState,
+                  postalCode: _currentCustomer!.billingPostalCode,
+                  country: _currentCustomer!.billingCountry,
+                  phone: _currentCustomer!.phone,
+                  email: _currentCustomer!.email,
+                ),
           onCheckoutEmailChanged: (value) {
             setState(() => _checkoutEmail = value);
             _syncActiveCart();
@@ -5003,6 +5073,24 @@ class _StoreShellState extends State<StoreShell> {
           onPromoCodeChanged: (value) => setState(() => _promoCode = value),
           onApplyPromoCode: () => unawaited(_applyPromoCode()),
           onRemovePromoCode: _removePromoCode,
+          availableStoreCredit: _currentCustomer == null
+              ? 0
+              : ((_currentCustomer!.loyaltyPoints ~/ 100) * 5.0) +
+                    _currentCustomer!.referralCredits,
+          useStoreCredit: _validAppliedCoupon?.type == 'Loyalty credit',
+          onUseStoreCreditChanged: (value) {
+            setState(() {
+              if (value) {
+                _appliedCoupon = _loyaltyCouponForCode('LOYALTY');
+                _promoMessage = _appliedCoupon == null
+                    ? 'No store credit is available.'
+                    : 'Store credit will be applied automatically.';
+              } else if (_appliedCoupon?.type == 'Loyalty credit') {
+                _appliedCoupon = null;
+                _promoMessage = '';
+              }
+            });
+          },
           shippingOptions: _enabledShippingOptions,
           selectedShippingOptionId: _selectedShippingOptionId,
           onShippingOptionChanged: (value) {
@@ -5321,6 +5409,147 @@ class _AdminNotificationBell extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LiveChatHelp extends StatefulWidget {
+  const _LiveChatHelp({
+    required this.customerName,
+    required this.customerEmail,
+    required this.onSend,
+  });
+
+  final String customerName;
+  final String customerEmail;
+  final void Function(String name, String email, String message) onSend;
+
+  @override
+  State<_LiveChatHelp> createState() => _LiveChatHelpState();
+}
+
+class _LiveChatHelpState extends State<_LiveChatHelp> {
+  bool _open = false;
+  late final TextEditingController _name;
+  late final TextEditingController _email;
+  final TextEditingController _message = TextEditingController();
+  final List<String> _sentMessages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.customerName);
+    _email = TextEditingController(text: widget.customerEmail);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _message.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_open) {
+      return FloatingActionButton.extended(
+        heroTag: 'live-chat-help',
+        onPressed: () => setState(() => _open = true),
+        icon: const Icon(Icons.chat_bubble_outline),
+        label: const Text('Open live chat'),
+      );
+    }
+    return SizedBox(
+      width: 360,
+      child: Card(
+        elevation: 12,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.support_agent_outlined),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Live chat help',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _open = false),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+              const Text(
+                'Send a message to EgbeAnom support. An administrator will follow up by email.',
+              ),
+              if (_sentMessages.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                for (final message in _sentMessages)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Chip(label: Text(message)),
+                  ),
+              ],
+              const SizedBox(height: 10),
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _email,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Email'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _message,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'How can we help?',
+                ),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: _send,
+                icon: const Icon(Icons.send_outlined),
+                label: const Text('Send message'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _send() {
+    final message = _message.text.trim();
+    final email = _email.text.trim();
+    if (message.isEmpty || Validators.validateEmail(email) != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email and message.')),
+      );
+      return;
+    }
+    widget.onSend(
+      _name.text.trim().isEmpty ? 'Website visitor' : _name.text.trim(),
+      email,
+      message,
+    );
+    setState(() {
+      _sentMessages.add(message);
+      _message.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your live chat message was sent.')),
     );
   }
 }

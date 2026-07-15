@@ -1,8 +1,15 @@
 .DS_Store
 node_modules/
 supabase/.temp/
+**/supabase/.temp/
 
 # Local hosting/database secrets and generated migration payloads.
+.env
+.env.*
+!.env.example
+!egbeanom/.env.example
+Docs/Admin Guide/Credentials.md
+Docs/Admin Guide Book/credentials.html
 godaddy/api/config.php
 godaddy/mysql/export*.json
 *.sql.gz

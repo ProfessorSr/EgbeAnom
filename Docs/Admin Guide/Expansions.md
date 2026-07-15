@@ -19,7 +19,7 @@ Use this page to see optional paid upgrades the client may want later.
 
 - Wholesale pricing, customer-specific price lists, purchase orders, net terms, and company accounts.
 - Subscription or replenishment orders for recurring fragrance purchases.
-- Live chat, help desk tickets, SMS updates, and automated post-purchase flows.
+- Help desk tickets, SMS updates, and automated post-purchase flows.
 - Advanced merchandising such as bundles, recommendations, upsells, cross-sells, waitlists, back-in-stock alerts, A/B tests, and a landing-page builder.
 
 ## Operations Expansions

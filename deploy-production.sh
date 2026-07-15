@@ -50,12 +50,33 @@ cd ..
 # Step 2: Deploy Edge Functions
 echo -e "\n${YELLOW}Step 2: Deploying Edge Functions...${NC}"
 
-# Deploy credential migration function
-echo "Deploying credential-migration function..."
-supabase functions deploy credential-migration \
-  --project-id "$SUPABASE_PROJECT_ID" \
-  --env-file .env.production
-echo -e "${GREEN}✓ credential-migration deployed${NC}"
+FUNCTIONS=(
+  "credential-migration"
+  "credential-vault"
+  "dhl-shipping"
+  "fedex-shipping"
+  "fetch-email"
+  "send-email"
+  "stripe-checkout-session"
+  "stripe-refund"
+  "stripe-webhook"
+  "tracking-status"
+  "ups-shipping"
+  "usps-shipping"
+)
+
+for function_name in "${FUNCTIONS[@]}"; do
+  echo "Deploying $function_name function..."
+  if [ -f ".env.production" ]; then
+    supabase functions deploy "$function_name" \
+      --project-ref "$SUPABASE_PROJECT_ID" \
+      --env-file .env.production
+  else
+    supabase functions deploy "$function_name" \
+      --project-ref "$SUPABASE_PROJECT_ID"
+  fi
+  echo -e "${GREEN}✓ $function_name deployed${NC}"
+done
 
 # Step 3: Verify Encryption Setup
 echo -e "\n${YELLOW}Step 3: Verifying encryption setup...${NC}"

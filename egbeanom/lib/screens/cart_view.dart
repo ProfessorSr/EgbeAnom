@@ -210,12 +210,16 @@ class CheckoutView extends StatelessWidget {
     required this.checkoutEmail,
     required this.checkoutPhone,
     required this.shippingAddress,
+    required this.billingAddress,
     required this.onCheckoutEmailChanged,
     required this.onCheckoutPhoneChanged,
     required this.onShippingAddressChanged,
     required this.onPromoCodeChanged,
     required this.onApplyPromoCode,
     required this.onRemovePromoCode,
+    required this.availableStoreCredit,
+    required this.useStoreCredit,
+    required this.onUseStoreCreditChanged,
     required this.shippingOptions,
     required this.selectedShippingOptionId,
     required this.onShippingOptionChanged,
@@ -241,12 +245,16 @@ class CheckoutView extends StatelessWidget {
   final String checkoutEmail;
   final String checkoutPhone;
   final ShippingAddress shippingAddress;
+  final ShippingAddress billingAddress;
   final ValueChanged<String> onCheckoutEmailChanged;
   final ValueChanged<String> onCheckoutPhoneChanged;
   final ValueChanged<ShippingAddress> onShippingAddressChanged;
   final ValueChanged<String> onPromoCodeChanged;
   final VoidCallback onApplyPromoCode;
   final VoidCallback onRemovePromoCode;
+  final double availableStoreCredit;
+  final bool useStoreCredit;
+  final ValueChanged<bool> onUseStoreCreditChanged;
   final List<ShippingOption> shippingOptions;
   final String selectedShippingOptionId;
   final ValueChanged<String> onShippingOptionChanged;
@@ -308,6 +316,7 @@ class CheckoutView extends StatelessWidget {
                           const SizedBox(height: 14),
                           _CheckoutAddressForms(
                             shippingAddress: shippingAddress,
+                            billingAddress: billingAddress,
                             onShippingAddressChanged: onShippingAddressChanged,
                           ),
                           const SizedBox(height: 14),
@@ -342,13 +351,6 @@ class CheckoutView extends StatelessWidget {
                                           : currency(option.price),
                                     ),
                                   ),
-                              if (subtotal > 125)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 6),
-                                  child: Text(
-                                    'Your order qualifies for free shipping at checkout.',
-                                  ),
-                                ),
                             ],
                           ),
                           const SizedBox(height: 14),
@@ -386,6 +388,9 @@ class CheckoutView extends StatelessWidget {
                         onPromoCodeChanged: onPromoCodeChanged,
                         onApplyPromoCode: onApplyPromoCode,
                         onRemovePromoCode: onRemovePromoCode,
+                        availableStoreCredit: availableStoreCredit,
+                        useStoreCredit: useStoreCredit,
+                        onUseStoreCreditChanged: onUseStoreCreditChanged,
                         onPlaceOrder: onPlaceOrder,
                       ),
                     ),
@@ -403,10 +408,12 @@ class CheckoutView extends StatelessWidget {
 class _CheckoutAddressForms extends StatefulWidget {
   const _CheckoutAddressForms({
     required this.shippingAddress,
+    required this.billingAddress,
     required this.onShippingAddressChanged,
   });
 
   final ShippingAddress shippingAddress;
+  final ShippingAddress billingAddress;
   final ValueChanged<ShippingAddress> onShippingAddressChanged;
 
   @override
@@ -415,7 +422,15 @@ class _CheckoutAddressForms extends StatefulWidget {
 
 class _CheckoutAddressFormsState extends State<_CheckoutAddressForms> {
   bool _gift = false;
-  bool _billingSameAsShipping = true;
+  late bool _billingSameAsShipping;
+  late ShippingAddress _billingAddress;
+
+  @override
+  void initState() {
+    super.initState();
+    _billingAddress = widget.billingAddress;
+    _billingSameAsShipping = widget.billingAddress.addressLine1.trim().isEmpty;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -456,8 +471,8 @@ class _CheckoutAddressFormsState extends State<_CheckoutAddressForms> {
             if (!_billingSameAsShipping)
               _AddressFields(
                 prefix: 'Bill to',
-                address: ShippingAddress(),
-                onChanged: (_) {},
+                address: _billingAddress,
+                onChanged: (value) => setState(() => _billingAddress = value),
               ),
           ],
         ),
@@ -957,6 +972,9 @@ class CheckoutReviewPanel extends StatelessWidget {
     required this.onApplyPromoCode,
     required this.onRemovePromoCode,
     required this.onPlaceOrder,
+    required this.availableStoreCredit,
+    required this.useStoreCredit,
+    required this.onUseStoreCreditChanged,
   });
 
   final List<CartLine> lines;
@@ -973,6 +991,9 @@ class CheckoutReviewPanel extends StatelessWidget {
   final VoidCallback onApplyPromoCode;
   final VoidCallback onRemovePromoCode;
   final VoidCallback onPlaceOrder;
+  final double availableStoreCredit;
+  final bool useStoreCredit;
+  final ValueChanged<bool> onUseStoreCreditChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1006,6 +1027,21 @@ class CheckoutReviewPanel extends StatelessWidget {
                   ],
                 ),
               ),
+            const Divider(height: 24),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: useStoreCredit,
+              onChanged: availableStoreCredit > 0
+                  ? onUseStoreCreditChanged
+                  : null,
+              title: const Text('Use store credit'),
+              subtitle: Text(
+                availableStoreCredit > 0
+                    ? '${currency(availableStoreCredit)} available; applied automatically'
+                    : 'No store credit is currently available',
+              ),
+              secondary: const Icon(Icons.account_balance_wallet_outlined),
+            ),
             const Divider(height: 24),
             _PromoCodeField(
               code: promoCode,
@@ -1106,7 +1142,7 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
     return TextField(
       controller: _controller,
       decoration: InputDecoration(
-        labelText: 'Promo, gift card, referral, or LOYALTY code',
+        labelText: 'Promotion, gift card, or referral code',
         prefixIcon: const Icon(Icons.card_giftcard_outlined),
         suffixIcon: widget.appliedCouponCode.isEmpty
             ? null
@@ -1593,7 +1629,15 @@ class AccountView extends StatefulWidget {
   State<AccountView> createState() => _AccountViewState();
 }
 
-enum _AccountDetailPage { home, profile, orders, credits, points, referrals }
+enum _AccountDetailPage {
+  home,
+  profile,
+  orders,
+  wishlist,
+  credits,
+  points,
+  referrals,
+}
 
 class _AccountViewState extends State<AccountView> {
   final _name = TextEditingController();
@@ -1829,10 +1873,13 @@ class _AccountViewState extends State<AccountView> {
           creditBalance: customer.referralCredits,
           loyaltyPoints: customer.loyaltyPoints,
           referralCode: customer.referralCode,
+          wishlistCount: widget.wishlistProducts.length,
           onOpenProfile: () =>
               setState(() => _detailPage = _AccountDetailPage.profile),
           onOpenOrders: () =>
               setState(() => _detailPage = _AccountDetailPage.orders),
+          onOpenWishlist: () =>
+              setState(() => _detailPage = _AccountDetailPage.wishlist),
           onOpenCredits: () =>
               setState(() => _detailPage = _AccountDetailPage.credits),
           onOpenPoints: () =>
@@ -1853,6 +1900,10 @@ class _AccountViewState extends State<AccountView> {
               storeInfo: widget.storeInfo,
               onBack: _openAccountHome,
               onRequestReturn: widget.onRequestReturn,
+            ),
+            _AccountDetailPage.wishlist => _CustomerWishlistPanel(
+              products: widget.wishlistProducts,
+              onBack: _openAccountHome,
             ),
             _AccountDetailPage.credits => _CustomerCreditsPanel(
               customer: customer,
@@ -1908,8 +1959,10 @@ class _CustomerAccountHome extends StatelessWidget {
     required this.creditBalance,
     required this.loyaltyPoints,
     required this.referralCode,
+    required this.wishlistCount,
     required this.onOpenProfile,
     required this.onOpenOrders,
+    required this.onOpenWishlist,
     required this.onOpenCredits,
     required this.onOpenPoints,
     required this.onOpenReferrals,
@@ -1919,8 +1972,10 @@ class _CustomerAccountHome extends StatelessWidget {
   final double creditBalance;
   final int loyaltyPoints;
   final String referralCode;
+  final int wishlistCount;
   final VoidCallback onOpenProfile;
   final VoidCallback onOpenOrders;
+  final VoidCallback onOpenWishlist;
   final VoidCallback onOpenCredits;
   final VoidCallback onOpenPoints;
   final VoidCallback onOpenReferrals;
@@ -1929,12 +1984,20 @@ class _CustomerAccountHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth > 980 ? 5 : 2;
+        final columns = constraints.maxWidth > 980 ? 6 : 2;
         final width = (constraints.maxWidth - ((columns - 1) * 10)) / columns;
         return Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
+            _AccountActionCard(
+              width: width,
+              icon: Icons.favorite_border,
+              title: 'Saved Fragrances',
+              value: '$wishlistCount item${wishlistCount == 1 ? '' : 's'}',
+              detail: 'Open your wishlist',
+              onTap: onOpenWishlist,
+            ),
             _AccountActionCard(
               width: width,
               icon: Icons.person_outline,
@@ -1978,6 +2041,42 @@ class _CustomerAccountHome extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _CustomerWishlistPanel extends StatelessWidget {
+  const _CustomerWishlistPanel({required this.products, required this.onBack});
+
+  final List<Fragrance> products;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AccountDetailScaffold(
+      title: 'Wishlist',
+      icon: Icons.favorite_border,
+      onBack: onBack,
+      child: products.isEmpty
+          ? const _EmptyState(
+              icon: Icons.favorite_border,
+              title: 'Your wishlist is empty',
+              body: 'Use the heart on a fragrance to save it here.',
+            )
+          : Column(
+              children: [
+                for (final product in products)
+                  ListTile(
+                    leading: const Icon(
+                      Icons.favorite,
+                      color: Color(0xFFC88F52),
+                    ),
+                    title: Text(product.name),
+                    subtitle: Text('${product.brand} • ${product.size}'),
+                    trailing: Text(currency(product.price)),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -2120,6 +2219,29 @@ class _CustomerAccountProfilePanelState
     text: widget.customer.postalCode,
   );
   late final _country = TextEditingController(text: widget.customer.country);
+  late final _billingAddress1 = TextEditingController(
+    text: widget.customer.billingAddressLine1,
+  );
+  late final _billingAddress2 = TextEditingController(
+    text: widget.customer.billingAddressLine2,
+  );
+  late final _billingCity = TextEditingController(
+    text: widget.customer.billingCity,
+  );
+  late final _billingCounty = TextEditingController(
+    text: widget.customer.billingCounty,
+  );
+  late final _billingState = TextEditingController(
+    text: widget.customer.billingState,
+  );
+  late final _billingPostalCode = TextEditingController(
+    text: widget.customer.billingPostalCode,
+  );
+  late final _billingCountry = TextEditingController(
+    text: widget.customer.billingCountry,
+  );
+  late bool _billingSameAsShipping =
+      widget.customer.billingAddressLine1.isEmpty;
   late bool _acceptsMarketing = widget.customer.acceptsMarketing;
   bool _saving = false;
 
@@ -2135,6 +2257,13 @@ class _CustomerAccountProfilePanelState
     _state.dispose();
     _postalCode.dispose();
     _country.dispose();
+    _billingAddress1.dispose();
+    _billingAddress2.dispose();
+    _billingCity.dispose();
+    _billingCounty.dispose();
+    _billingState.dispose();
+    _billingPostalCode.dispose();
+    _billingCountry.dispose();
     super.dispose();
   }
 
@@ -2150,73 +2279,161 @@ class _CustomerAccountProfilePanelState
           LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth > 680;
-              return Wrap(
-                spacing: 12,
-                runSpacing: 12,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
-                    controller: _name,
-                    label: 'Full name',
-                    icon: Icons.person_outline,
+                  Text(
+                    'Contact information',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
-                    controller: _email,
-                    label: 'Email',
-                    icon: Icons.email_outlined,
-                    keyboardType: TextInputType.emailAddress,
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                        controller: _name,
+                        label: 'Full name',
+                        icon: Icons.person_outline,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                        controller: _email,
+                        label: 'Email',
+                        icon: Icons.email_outlined,
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                        controller: _phone,
+                        label: 'Phone',
+                        icon: Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [InternationalPhoneInputFormatter()],
+                      ),
+                    ],
                   ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
-                    controller: _phone,
-                    label: 'Phone',
-                    icon: Icons.phone_outlined,
-                    keyboardType: TextInputType.phone,
+                  const SizedBox(height: 18),
+                  Text(
+                    'Shipping address',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
-                    controller: _country,
-                    label: 'Country',
-                    icon: Icons.public,
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                        controller: _country,
+                        label: 'Country',
+                        icon: Icons.public,
+                      ),
+                      _profileField(
+                        width: constraints.maxWidth,
+                        controller: _address1,
+                        label: 'Address line 1',
+                        icon: Icons.home_outlined,
+                      ),
+                      _profileField(
+                        width: constraints.maxWidth,
+                        controller: _address2,
+                        label: 'Address line 2',
+                        icon: Icons.home_work_outlined,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                        controller: _city,
+                        label: 'City',
+                        icon: Icons.location_city_outlined,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                        controller: _county,
+                        label: 'County',
+                        icon: Icons.map_outlined,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                        controller: _state,
+                        label: 'State',
+                        icon: Icons.signpost_outlined,
+                      ),
+                      _profileField(
+                        width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                        controller: _postalCode,
+                        label: 'ZIP / postal code',
+                        icon: Icons.local_post_office_outlined,
+                        keyboardType: TextInputType.streetAddress,
+                      ),
+                    ],
                   ),
-                  _profileField(
-                    width: constraints.maxWidth,
-                    controller: _address1,
-                    label: 'Address line 1',
-                    icon: Icons.home_outlined,
+                  const SizedBox(height: 18),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _billingSameAsShipping,
+                    title: const Text(
+                      'Billing address is the same as shipping',
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _billingSameAsShipping = value ?? true),
                   ),
-                  _profileField(
-                    width: constraints.maxWidth,
-                    controller: _address2,
-                    label: 'Address line 2',
-                    icon: Icons.home_work_outlined,
-                  ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
-                    controller: _city,
-                    label: 'City',
-                    icon: Icons.location_city_outlined,
-                  ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
-                    controller: _county,
-                    label: 'County',
-                    icon: Icons.map_outlined,
-                  ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 24) / 3 : null,
-                    controller: _state,
-                    label: 'State',
-                    icon: Icons.signpost_outlined,
-                  ),
-                  _profileField(
-                    width: wide ? (constraints.maxWidth - 12) / 2 : null,
-                    controller: _postalCode,
-                    label: 'ZIP / postal code',
-                    icon: Icons.local_post_office_outlined,
-                    keyboardType: TextInputType.streetAddress,
-                  ),
+                  if (!_billingSameAsShipping) ...[
+                    Text(
+                      'Billing address',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _profileField(
+                          width: constraints.maxWidth,
+                          controller: _billingAddress1,
+                          label: 'Billing address line 1',
+                          icon: Icons.home_outlined,
+                        ),
+                        _profileField(
+                          width: constraints.maxWidth,
+                          controller: _billingAddress2,
+                          label: 'Billing address line 2',
+                          icon: Icons.home_work_outlined,
+                        ),
+                        _profileField(
+                          width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                          controller: _billingCity,
+                          label: 'Billing city',
+                          icon: Icons.location_city_outlined,
+                        ),
+                        _profileField(
+                          width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                          controller: _billingCounty,
+                          label: 'Billing county',
+                          icon: Icons.map_outlined,
+                        ),
+                        _profileField(
+                          width: wide ? (constraints.maxWidth - 24) / 3 : null,
+                          controller: _billingState,
+                          label: 'Billing state',
+                          icon: Icons.signpost_outlined,
+                        ),
+                        _profileField(
+                          width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                          controller: _billingPostalCode,
+                          label: 'Billing ZIP / postal code',
+                          icon: Icons.local_post_office_outlined,
+                        ),
+                        _profileField(
+                          width: wide ? (constraints.maxWidth - 12) / 2 : null,
+                          controller: _billingCountry,
+                          label: 'Billing country',
+                          icon: Icons.public,
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               );
             },
@@ -2261,12 +2478,14 @@ class _CustomerAccountProfilePanelState
     required IconData icon,
     double? width,
     TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return SizedBox(
       width: width,
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
         decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
       ),
     );
@@ -2318,6 +2537,31 @@ class _CustomerAccountProfilePanelState
           country: _country.text.trim().isEmpty
               ? 'US'
               : _country.text.trim().toUpperCase(),
+          billingAddressLine1: _billingSameAsShipping
+              ? _address1.text.trim()
+              : _billingAddress1.text.trim(),
+          billingAddressLine2: _billingSameAsShipping
+              ? _address2.text.trim()
+              : _billingAddress2.text.trim(),
+          billingCity: _billingSameAsShipping
+              ? _city.text.trim()
+              : _billingCity.text.trim(),
+          billingCounty: _billingSameAsShipping
+              ? _county.text.trim()
+              : _billingCounty.text.trim(),
+          billingState: _billingSameAsShipping
+              ? _state.text.trim()
+              : _billingState.text.trim(),
+          billingPostalCode: _billingSameAsShipping
+              ? _postalCode.text.trim()
+              : _billingPostalCode.text.trim(),
+          billingCountry: _billingSameAsShipping
+              ? (_country.text.trim().isEmpty
+                    ? 'US'
+                    : _country.text.trim().toUpperCase())
+              : (_billingCountry.text.trim().isEmpty
+                    ? 'US'
+                    : _billingCountry.text.trim().toUpperCase()),
           acceptsMarketing: _acceptsMarketing,
         ),
       );
@@ -2333,6 +2577,40 @@ class _CustomerAccountProfilePanelState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+class InternationalPhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return const TextEditingValue();
+    if (!newValue.text.trimLeft().startsWith('+') && digits.length <= 10) {
+      digits = '1$digits';
+    }
+    if (digits.length > 15) digits = digits.substring(0, 15);
+    final countryLength = digits.length > 11 ? digits.length - 10 : 1;
+    final country = digits.substring(0, countryLength);
+    final local = digits.substring(countryLength);
+    final buffer = StringBuffer('+$country');
+    if (local.isNotEmpty) buffer.write(' ');
+    if (local.length <= 3) {
+      buffer.write(local);
+    } else if (local.length <= 6) {
+      buffer.write('${local.substring(0, 3)}-${local.substring(3)}');
+    } else {
+      buffer.write(
+        '${local.substring(0, 3)}-${local.substring(3, 6)}-${local.substring(6)}',
+      );
+    }
+    final formatted = buffer.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
   }
 }
 

@@ -236,14 +236,14 @@ class Validators {
     return null;
   }
 
-  /// Validates phone number (basic US format)
+  /// Validates an international phone number, including country code.
   static String? validatePhone(String? phone) {
     if (phone == null || phone.isEmpty) {
       return 'Phone number is required';
     }
     final trimmed = phone.replaceAll(RegExp(r'[^\d]'), '');
-    if (trimmed.length != 10) {
-      return 'Phone number must be 10 digits';
+    if (trimmed.length < 11 || trimmed.length > 15) {
+      return 'Include a country code and 10-15 phone digits';
     }
     return null;
   }
